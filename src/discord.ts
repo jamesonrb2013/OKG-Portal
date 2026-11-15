@@ -6,6 +6,7 @@ export async function syncMember(db: PrismaClient, member: GuildMember) {
   if (!guildId || member.guild.id !== guildId) return;
   const user = await db.user.findUnique({ where: { discordId: member.id } });
   if (!user) return;
+  await db.user.update({ where: { id: user.id }, data: { isGuildMember: true } });
   const roleIds = [...member.roles.cache.keys()].filter(id => id !== member.guild.id);
   await db.$transaction([
     db.memberRole.deleteMany({ where: { userId: user.id, guildId } }),
@@ -34,7 +35,10 @@ export async function startDiscordGateway(db: PrismaClient) {
   client.on(Events.GuildMemberRemove, async member => {
     try {
       const user = await db.user.findUnique({ where: { discordId: member.id } });
-      if (user) await db.memberRole.deleteMany({ where: { userId: user.id, guildId: member.guild.id } });
+      if (user) await db.$transaction([
+        db.memberRole.deleteMany({ where: { userId: user.id, guildId: member.guild.id } }),
+        db.user.update({ where: { id: user.id }, data: { isGuildMember: false } })
+      ]);
     } catch (error) { console.error("Member removal sync failed", error); }
   });
   client.once(Events.ClientReady, ready => console.log(`Discord role listener connected as ${ready.user.tag}`));
