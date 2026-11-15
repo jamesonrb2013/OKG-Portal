@@ -301,6 +301,7 @@ export async function startDiscordGateway(db: PrismaClient) {
   }
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
   activeClient = client;
+  client.on(Events.Error, error => console.error("Discord gateway client error:", error));
   client.on(Events.GuildMemberUpdate, async (_before, after) => {
     try { await syncMember(db, after); } catch (error) { console.error("Role update sync failed", error); }
   });
