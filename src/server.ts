@@ -15,6 +15,8 @@ const app = express();
 const port = Number(process.env.PORT || 10000);
 const baseUrl = process.env.APP_BASE_URL || "http://localhost:10000";
 const guildId = process.env.DISCORD_GUILD_ID || "";
+if (process.env.NODE_ENV === "production" && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32)) throw new Error("SESSION_SECRET must be at least 32 characters in production.");
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const PgSession = connectPgSimple(session);
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined });
 
@@ -22,13 +24,22 @@ declare module "express-session" { interface SessionData { userId?: string; oaut
 type AuthedRequest = Request & { portalUser?: Awaited<ReturnType<typeof db.user.findUnique>> };
 
 app.set("trust proxy", 1);
-app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'"], imgSrc: ["'self'", "https://cdn.discordapp.com", "data:"], connectSrc: ["'self'"] } } }));
+app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["'self'", "https://fonts.gstatic.com"], scriptSrc: ["'self'"], imgSrc: ["'self'", "https://cdn.discordapp.com", "data:"], connectSrc: ["'self'"] } } }));
 app.use(express.urlencoded({ extended: true, limit: "32kb" }));
 app.use(express.json({ limit: "32kb" }));
+app.use((req, res, next) => {
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+    const origin = req.get("origin");
+    const referer = req.get("referer");
+    const source = origin || (referer ? new URL(referer).origin : "");
+    if (source && source !== new URL(baseUrl).origin) return res.status(403).send("Cross-origin request blocked.");
+  }
+  next();
+});
 app.use(session({
   store: new PgSession({ pool, tableName: "portal_sessions", createTableIfMissing: true }),
   name: "okg.portal.sid",
-  secret: process.env.SESSION_SECRET || "development-only-change-this-secret",
+  secret: sessionSecret,
   resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 1000 * 60 * 60 * 24 * 7 }
 }));
@@ -174,7 +185,8 @@ app.get("/audit", auth, requirePermission("audit:view"), async (req,res) => {
 });
 app.use((err: unknown,_req:Request,res:Response,_next:NextFunction)=>{console.error(err);res.status(500).send("Something went wrong. Please try again.");});
 async function main(){
- if(!process.env.DATABASE_URL) console.warn("DATABASE_URL is not configured.");
+ if(!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required.");
+ if(process.env.NODE_ENV === "production" && (!process.env.DISCORD_CLIENT_ID || !process.env.DISCORD_CLIENT_SECRET || !process.env.DISCORD_BOT_TOKEN || !guildId || !process.env.OWNER_DISCORD_USER_ID)) throw new Error("Discord OAuth, bot, guild and owner environment variables must be configured before production startup.");
  await startDiscordGateway(db);
  app.listen(port,()=>console.log(`OKG Portal listening on ${port}`));
 }
