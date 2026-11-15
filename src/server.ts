@@ -7,7 +7,7 @@ import helmet from "helmet";
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { getPermissions, hasPermission, PERMISSIONS } from "./permissions";
-import { startDiscordGateway } from "./discord";
+import { startDiscordGateway, getDiscordStatus, getDiscordSnapshot } from "./discord";
 import crypto from "node:crypto";
 
 const db = new PrismaClient();
@@ -35,7 +35,8 @@ app.use((req, res, next) => {
   if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
     const origin = req.get("origin");
     const referer = req.get("referer");
-    const source = origin || (referer ? new URL(referer).origin : "");
+    let source = origin || "";
+    if (!source && referer) { try { source = new URL(referer).origin; } catch { return res.status(403).send("Invalid request origin."); } }
     if (source && source !== new URL(baseUrl).origin) return res.status(403).send("Cross-origin request blocked.");
   }
   next();
@@ -50,7 +51,7 @@ app.use(session({
 app.use("/assets", express.static("public", { maxAge: "1h" }));
 
 function shell(title: string, content: string, user?: any) {
-  const nav = user ? `<nav><a href="/dashboard">Overview</a><a href="/members">Members</a><a href="/control">Control Center</a><a href="/apply">Apply</a><a href="/applications">Review queue</a><a href="/settings">Role settings</a><a href="/audit">Audit</a><a href="/logout">Sign out</a></nav>` : "";
+  const nav = user ? `<nav><a href="/dashboard">Overview</a><a href="/members">Members</a><a href="/server">Server</a><a href="/moderation">Moderation</a><a href="/bot">Bot</a><a href="/control">Control Center</a><a href="/applications">Applications</a><a href="/settings">Settings</a><a href="/audit">Audit</a><a href="/logout">Sign out</a></nav>` : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b14"><title>${title} · OKG Portal</title><link rel="stylesheet" href="/assets/style.css"></head><body><div class="ambient"></div><header class="topbar"><a class="brand" href="/"><span class="brand-mark">O</span><span>ONE KID GAMING<small>OFFICIAL PORTAL</small></span></a>${nav}<div class="top-right">${user ? `<span class="user-chip">${escapeHtml(user.displayName || user.username)}</span>` : '<a class="button button-quiet" href="/auth/discord">Sign in</a>'}</div></header><main>${content}</main><footer>ONE KID GAMING <span>·</span> Official community platform</footer></body></html>`;
 }
 function escapeHtml(value: unknown): string { return String(value ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]!)); }
@@ -253,6 +254,93 @@ app.get("/audit", auth, requirePermission("audit:view"), async (req,res) => {
  const rows=events.map(e=>`<tr><td>${e.createdAt.toLocaleString()}</td><td>${escapeHtml(e.actor?.displayName||e.actor?.username||"System")}</td><td>${escapeHtml(e.action)}</td><td>${escapeHtml(e.subject||"—")}</td></tr>`).join("");
  page(res,"Audit log",`<section class="page-heading"><span class="eyebrow">SECURITY & ACCOUNTABILITY</span><h1>Audit log.</h1><p>Recent administrative and account events.</p></section><section class="panel table-panel"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Subject</th></tr></thead><tbody>${rows}</tbody></table></section>`,user);
 });
+
+function actionForm(title: string, type: string, fields: string) {
+ return '<section class="panel"><span class="eyebrow">DISCORD OPERATIONS</span><h2>'+escapeHtml(title)+'</h2><form method="post" action="/control/actions"><input type="hidden" name="type" value="'+escapeHtml(type)+'">'+fields+'<button class="button" type="submit">Queue action</button></form></section>';
+}
+app.get("/bot", auth, requireOwner, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const status=getDiscordStatus();
+ const jobs=await db.discordAction.findMany({orderBy:{createdAt:"desc"},take:12});
+ const counts=await db.discordAction.groupBy({by:["status"],_count:{_all:true}});
+ const count=(key:string)=>counts.find(x=>x.status===key)?._count._all||0;
+ const rows=jobs.map(j=>'<tr><td>'+j.createdAt.toLocaleString()+'</td><td>'+escapeHtml(j.type)+'</td><td>'+escapeHtml(j.status)+'</td><td>'+escapeHtml(j.result||"Waiting for worker")+'</td></tr>').join("");
+ const html='<section class="page-heading"><span class="eyebrow">SYSTEMS · DISCORD GATEWAY</span><h1>Bot operations.</h1><p>Live connection state, command registration and action worker activity.</p></section>'+
+ '<section class="stat-grid"><article class="stat"><small>GATEWAY</small><strong>'+(status.online?'Online':'Offline')+'</strong><span>'+(status.username?escapeHtml(status.username):'No active bot session')+'</span></article><article class="stat"><small>LATENCY</small><strong>'+(status.ping===null?'—':status.ping+' ms')+'</strong><span>Discord WebSocket heartbeat</span></article><article class="stat"><small>SLASH COMMANDS</small><strong>'+(status.commandsRegistered?'Registered':'Not registered')+'</strong><span>Guild-scoped /okg command group</span></article></section>'+
+ '<section class="content-grid"><article class="panel"><span class="eyebrow">WORK QUEUE</span><h2>Action worker</h2><div class="list-row"><b>Queued</b><span class="status">'+count("queued")+'</span></div><div class="list-row"><b>Processing</b><span class="status">'+count("processing")+'</span></div><div class="list-row"><b>Completed</b><span class="status">'+count("completed")+'</span></div><div class="list-row"><b>Failed</b><span class="status">'+count("failed")+'</span></div><p class="muted small">The worker runs inside the same Render service as the portal.</p></article><article class="panel"><span class="eyebrow">REGISTERED COMMANDS</span><h2>/okg</h2><p>ping · server · member · announce · role-add · role-remove · nickname · warn · timeout · clear-timeout · kick · ban · unban · sync</p><p class="muted small">Every command checks the configured owner Discord user ID on the server before executing.</p></article></section>'+
+ '<section class="panel table-panel"><h2>Recent bot jobs</h2><div class="table-wrap"><table><thead><tr><th>Requested</th><th>Action</th><th>Status</th><th>Result</th></tr></thead><tbody>'+(rows||'<tr><td colspan="4">No jobs recorded.</td></tr>')+'</tbody></table></div></section>';
+ page(res,"Bot operations",html,user);
+});
+app.get("/server", auth, requireOwner, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const snapshot=await getDiscordSnapshot();
+ if(!snapshot) return page(res,"Server overview",'<section class="panel narrow"><h1>Discord is not connected.</h1><p>The bot must be online before live server information can be loaded.</p><a class="button" href="/bot">View bot status</a></section>',user);
+ const channels=snapshot.channels.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>'<tr><td>#'+escapeHtml(c.name)+'</td><td><code>'+escapeHtml(c.id)+'</code></td><td>'+escapeHtml(String(c.type))+'</td><td><form method="post" action="/control/actions"><input type="hidden" name="type" value="delete_channel"><input type="hidden" name="channelId" value="'+escapeHtml(c.id)+'"><button class="text-button">Delete</button></form></td></tr>').join("");
+ const roles=snapshot.roles.slice().sort((a,b)=>b.position-a.position).map(r=>'<tr><td><b>'+escapeHtml(r.name)+'</b></td><td><code>'+escapeHtml(r.id)+'</code></td><td>'+r.position+'</td><td>'+(r.managed?'Managed':r.editable?'Editable':'Above bot')+'</td><td>'+(r.editable?'<form method="post" action="/control/actions"><input type="hidden" name="type" value="delete_role"><input type="hidden" name="roleId" value="'+escapeHtml(r.id)+'"><button class="text-button">Delete</button></form>':'—')+'</td></tr>').join("");
+ const html='<section class="page-heading"><span class="eyebrow">OFFICIAL DISCORD SERVER</span><h1>'+escapeHtml(snapshot.name)+'.</h1><p>Live server inventory from the connected OKG bot.</p></section>'+
+ '<section class="stat-grid"><article class="stat"><small>MEMBERS</small><strong>'+snapshot.memberCount+'</strong><span>Discord-reported count</span></article><article class="stat"><small>CHANNELS</small><strong>'+snapshot.channels.length+'</strong><span>Visible to the bot</span></article><article class="stat"><small>ROLES</small><strong>'+snapshot.roles.length+'</strong><span>Manageable role inventory</span></article></section>'+
+ '<section class="content-grid"><article class="panel"><h2>Create a channel</h2><form method="post" action="/control/actions"><input type="hidden" name="type" value="create_channel"><label>Channel name<input name="name" required maxlength="90" pattern="[a-z0-9_-]+"></label><label>Channel type<select name="channelType"><option value="text">Text</option><option value="voice">Voice</option></select></label><label>Topic (optional)<input name="topic" maxlength="1024"></label><button class="button">Create channel</button></form></article><article class="panel"><h2>Create a role</h2><form method="post" action="/control/actions"><input type="hidden" name="type" value="create_role"><label>Role name<input name="name" required maxlength="100"></label><label>Hex color<input name="color" placeholder="#78a9ff" pattern="#[0-9a-fA-F]{6}"></label><button class="button">Create role</button></form><p class="muted small">Role position and permissions can only be changed within the bot's Discord role hierarchy.</p></article></section>'+
+ '<section class="panel table-panel"><h2>Channels</h2><div class="table-wrap"><table><thead><tr><th>Channel</th><th>ID</th><th>Type</th><th></th></tr></thead><tbody>'+channels+'</tbody></table></div></section>'+
+ '<section class="panel table-panel"><h2>Roles</h2><div class="table-wrap"><table><thead><tr><th>Role</th><th>ID</th><th>Position</th><th>Bot access</th><th></th></tr></thead><tbody>'+roles+'</tbody></table></div></section>';
+ page(res,"Server overview",html,user);
+});
+app.get("/moderation", auth, requireOwner, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const cases=await db.moderationCase.findMany({where:{guildId},orderBy:{createdAt:"desc"},take:150});
+ const rows=cases.map(c=>'<tr><td>'+c.createdAt.toLocaleString()+'</td><td><code>'+escapeHtml(c.targetDiscordId)+'</code></td><td>'+escapeHtml(c.type)+'</td><td>'+escapeHtml(c.reason)+'</td><td>'+(c.active?'Active':'Closed')+'</td><td>'+escapeHtml(c.moderatorDiscordId)+'</td></tr>').join("");
+ const html='<section class="page-heading"><span class="eyebrow">TRUST & SAFETY</span><h1>Moderation center.</h1><p>Issue and review warnings, timeouts, kicks and bans. Actions are executed by the connected bot and written to the audit log.</p></section>'+
+ '<section class="content-grid"><article class="panel"><h2>Member action</h2><form method="post" action="/moderation/actions"><label>Action<select name="type"><option value="warn_member">Warn</option><option value="timeout_member">Timeout</option><option value="clear_timeout">Clear timeout</option><option value="kick_member">Kick</option><option value="ban_member">Ban</option><option value="unban_member">Unban</option></select></label><label>Member Discord ID<input name="userId" required pattern="[0-9]{15,22}"></label><label>Timeout duration (minutes)<input name="minutes" type="number" min="1" max="40320" value="60"></label><label>Reason<textarea name="reason" required maxlength="500" rows="3"></textarea></label><button class="button">Queue moderation action</button></form></article><article class="panel"><span class="eyebrow">IMPORTANT</span><h2>Moderation safeguards</h2><p>Only the configured platform owner can access this page. The bot must hold the relevant Discord permissions and be above the target member or role in the server hierarchy.</p><p class="muted small">Warnings are stored even if a member has DMs disabled. Timeout duration is limited to Discord's 28-day maximum.</p></article></section>'+
+ '<section class="panel table-panel"><h2>Moderation history</h2><div class="table-wrap"><table><thead><tr><th>Date</th><th>Member ID</th><th>Action</th><th>Reason</th><th>Status</th><th>Moderator</th></tr></thead><tbody>'+(rows||'<tr><td colspan="6">No moderation cases recorded.</td></tr>')+'</tbody></table></div></section>';
+ page(res,"Moderation center",html,user);
+});
+app.post("/moderation/actions", auth, requireOwner, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const type=z.enum(["warn_member","timeout_member","clear_timeout","kick_member","ban_member","unban_member"]).safeParse(req.body.type);
+ const userId=z.string().regex(/^\d{15,22}$/).safeParse(req.body.userId);
+ const reason=z.string().trim().min(1).max(500).safeParse(req.body.reason||"No reason supplied.");
+ if(!type.success||!userId.success||!reason.success) return res.status(400).send("Check the moderation action, Discord ID and reason.");
+ const payload:any={userId:userId.data,reason:reason.data,moderatorDiscordId:user.discordId};
+ if(type.data==="timeout_member"){
+  const minutes=z.coerce.number().int().min(1).max(40320).safeParse(req.body.minutes);
+  if(!minutes.success) return res.status(400).send("Timeout must be between 1 and 40,320 minutes.");
+  payload.durationSeconds=minutes.data*60;
+ }
+ const job=await db.discordAction.create({data:{type:type.data,payload,requestedBy:user.id}});
+ await audit(user.id,"moderation.action.queued",job.id,{type:type.data,target:userId.data});
+ res.redirect("/moderation");
+});
+app.get("/members/:discordId", auth, requireOwner, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const discordId=String(req.params.discordId);
+ if(!/^\d{15,22}$/.test(discordId)) return res.status(400).send("Invalid Discord ID.");
+ const member=await db.user.findUnique({where:{discordId},include:{memberRoles:{where:{guildId}}}});
+ const cases=await db.moderationCase.findMany({where:{guildId,targetDiscordId:discordId},orderBy:{createdAt:"desc"},take:30});
+ const roles=member?.memberRoles.map(r=>'<li><code>'+escapeHtml(r.discordRoleId)+'</code></li>').join("")||"";
+ const history=cases.map(c=>'<tr><td>'+c.createdAt.toLocaleString()+'</td><td>'+escapeHtml(c.type)+'</td><td>'+escapeHtml(c.reason)+'</td></tr>').join("");
+ const html='<section class="page-heading"><span class="eyebrow">MEMBER PROFILE</span><h1>'+escapeHtml(member?.displayName||member?.username||"Discord member")+'.</h1><p>Discord ID: <code>'+escapeHtml(discordId)+'</code></p></section>'+
+ '<section class="content-grid"><article class="panel"><h2>Account</h2><p>Username: '+escapeHtml(member?.username||"Not yet linked to a portal account")+'</p><p>Membership: '+(member?.isGuildMember?'Verified':'Not verified')+'</p><p>Last portal login: '+(member?.lastLoginAt.toLocaleString()||"—")+'</p></article><article class="panel"><h2>Synced roles</h2><ul>'+roles+'</ul></article></section>'+
+ '<section class="panel table-panel"><h2>Moderation history</h2><table><thead><tr><th>Date</th><th>Action</th><th>Reason</th></tr></thead><tbody>'+(history||'<tr><td colspan="3">No history.</td></tr>')+'</tbody></table></section>';
+ page(res,"Member profile",html,user);
+});
+app.get("/api/owner/status", auth, requireOwner, async (_req,res) => {
+ const [users,applications,queued,failed]=await Promise.all([
+  db.user.count({where:{isGuildMember:true}}),db.application.count(),
+  db.discordAction.count({where:{status:"queued"}}),db.discordAction.count({where:{status:"failed"}})
+ ]);
+ res.json({ok:true,users,applications,queued,failed,discord:getDiscordStatus(),time:new Date().toISOString()});
+});
+app.post("/applications/:id/notes", auth, requireOwner, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const applicationId=String(req.params.id);
+ const body=z.string().trim().min(1).max(2000).safeParse(req.body.body);
+ if(!body.success) return res.status(400).send("Note must contain 1 to 2,000 characters.");
+ const application=await db.application.findUnique({where:{id:applicationId}});
+ if(!application) return res.status(404).send("Application not found.");
+ await db.applicationNote.create({data:{applicationId,authorId:user.id,body:body.data}});
+ await audit(user.id,"application.note.created",applicationId);
+ res.redirect("/applications/"+applicationId);
+});
+
 app.use((err: unknown,_req:Request,res:Response,_next:NextFunction)=>{console.error(err);res.status(500).send("Something went wrong. Please try again.");});
 async function main(){
  if(!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required.");
