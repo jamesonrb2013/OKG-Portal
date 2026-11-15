@@ -52,10 +52,11 @@ function shell(title: string, content: string, user?: any) {
 function escapeHtml(value: unknown): string { return String(value ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]!)); }
 function page(res: Response, title: string, content: string, user?: any) { res.type("html").send(shell(title, content, user)); }
 async function auth(req: Request, res: Response, next: NextFunction) {
-  const user = req.session.userId ? await db.user.findUnique({ where: { id: req.session.userId } }) : null;
-  if (!user || !user.isGuildMember) {
+  const sessionUser = req.session.userId ? await db.user.findUnique({ where: { id: req.session.userId } }) : null;
+  const user = sessionUser?.discordId === process.env.OWNER_DISCORD_USER_ID ? sessionUser : null;
+  if (!user || !user.isGuildMember || user.discordId !== process.env.OWNER_DISCORD_USER_ID) {
     if (req.session.userId) req.session.destroy(() => {});
-    return res.redirect("/?signin=1");
+    return page(res, "Portal access restricted", '<section class="panel narrow"><span class="eyebrow">PRIVATE OWNER ACCESS</span><h1>OKG Portal is currently private.</h1><p>Only the platform owner can use an account right now. Any previous non-owner sessions have been signed out.</p><a class="button" href="/">Return home</a></section>');
   }
   (req as AuthedRequest).portalUser = user;
   next();
