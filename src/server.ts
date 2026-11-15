@@ -46,7 +46,7 @@ app.use(session({
 app.use("/assets", express.static("public", { maxAge: "1h" }));
 
 function shell(title: string, content: string, user?: any) {
-  const nav = user ? `<nav><a href="/dashboard">Overview</a><a href="/apply">Applications</a><a href="/applications">Review queue</a><a href="/settings">Role settings</a><a href="/logout">Sign out</a></nav>` : "";
+  const nav = user ? `<nav><a href="/dashboard">Overview</a><a href="/members">Members</a><a href="/apply">Apply</a><a href="/applications">Review queue</a><a href="/settings">Role settings</a><a href="/audit">Audit</a><a href="/logout">Sign out</a></nav>` : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b14"><title>${title} · OKG Portal</title><link rel="stylesheet" href="/assets/style.css"></head><body><div class="ambient"></div><header class="topbar"><a class="brand" href="/"><span class="brand-mark">O</span><span>ONE KID GAMING<small>OFFICIAL PORTAL</small></span></a>${nav}<div class="top-right">${user ? `<span class="user-chip">${escapeHtml(user.displayName || user.username)}</span>` : '<a class="button button-quiet" href="/auth/discord">Sign in</a>'}</div></header><main>${content}</main><footer>ONE KID GAMING <span>·</span> Official community platform</footer></body></html>`;
 }
 function escapeHtml(value: unknown): string { return String(value ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]!)); }
@@ -186,6 +186,14 @@ app.post("/settings/roles/:id/delete", auth, requirePermission("roles:manage"), 
  const mapping=await db.roleMapping.findFirst({where:{id:mappingId,guildId}});
  if(mapping){await db.roleMapping.delete({where:{id:mapping.id}});await audit(user.id,"role_mapping.deleted",mapping.discordRoleId,{permission:mapping.permission});}
  res.redirect("/settings");
+});
+app.get("/members", auth, requirePermission("members:view"), async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const q=String(req.query.q||"").trim().slice(0,80);
+ const members=await db.user.findMany({where:{isGuildMember:true,...(q?{OR:[{username:{contains:q,mode:"insensitive"}},{displayName:{contains:q,mode:"insensitive"}},{discordId:{contains:q}}]}:{})},orderBy:{username:"asc"},take:100,include:{memberRoles:{where:{guildId}}}});
+ const rows=members.map(m=>"<tr><td><b>"+escapeHtml(m.displayName||m.username)+"</b><small>@"+escapeHtml(m.username)+"</small></td><td><code>"+escapeHtml(m.discordId)+"</code></td><td>"+(m.isOwner?"Platform Owner":m.memberRoles.length+" synced roles")+"</td><td>"+m.lastLoginAt.toLocaleDateString()+"</td></tr>").join("");
+ const html="<section class=\"page-heading\"><span class=\"eyebrow\">OFFICIAL COMMUNITY</span><h1>Member directory.</h1><p>Verified members of the official OKG Discord server. Directory access is controlled by Discord role permissions.</p></section><section class=\"panel table-panel\"><form method=\"get\" action=\"/members\" class=\"mapping-form\"><label>Search members<input name=\"q\" value=\""+escapeHtml(q)+"\" placeholder=\"Name, username or Discord ID\"></label><button class=\"button\" type=\"submit\">Search</button><a class=\"button button-quiet\" href=\"/members\">Clear</a></form><div class=\"table-wrap\"><table><thead><tr><th>Member</th><th>Discord ID</th><th>Portal roles</th><th>Last login</th></tr></thead><tbody>"+(rows||"<tr><td colspan=\"4\">No matching members found.</td></tr>")+"</tbody></table></div><p class=\"muted small\">Showing up to 100 matching verified members.</p></section>";
+ page(res,"Member directory",html,user);
 });
 app.get("/audit", auth, requirePermission("audit:view"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
