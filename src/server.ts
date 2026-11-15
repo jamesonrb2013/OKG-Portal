@@ -86,7 +86,15 @@ function audit(actorId: string, action: string, subject?: string, details?: obje
   return db.auditEvent.create({ data: { actorId, action, subject, details: details as any } });
 }
 
-app.get("/health", (_req, res) => res.json({ ok: true, service: "okg-portal" }));
+app.get("/health", async (_req, res) => {
+  try {
+    await db.$queryRaw`SELECT 1`;
+    res.json({ ok: true, service: "okg-portal", database: "connected", discord: getDiscordStatus() });
+  } catch (error) {
+    console.error("Portal health check database failure:", error);
+    res.status(503).json({ ok: false, service: "okg-portal", database: "unavailable" });
+  }
+});
 app.get("/", async (req, res) => {
   const sessionUser = req.session.userId ? await db.user.findUnique({ where: { id: req.session.userId } }) : null;
   const user = sessionUser?.discordId === process.env.OWNER_DISCORD_USER_ID ? sessionUser : null;
