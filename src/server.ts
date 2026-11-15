@@ -337,6 +337,7 @@ app.get("/server", auth, requireOwner, async (req,res) => {
 });
 app.get("/moderation", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
+ await db.moderationCase.updateMany({where:{guildId,type:"timeout",active:true,expiresAt:{lt:new Date()}},data:{active:false}});
  const cases=await db.moderationCase.findMany({where:{guildId},orderBy:{createdAt:"desc"},take:150});
  const rows=cases.map(c=>'<tr><td>'+c.createdAt.toLocaleString()+'</td><td><code>'+escapeHtml(c.targetDiscordId)+'</code></td><td>'+escapeHtml(c.type)+'</td><td>'+escapeHtml(c.reason)+'</td><td>'+(c.active?'Active':'Closed')+'</td><td>'+escapeHtml(c.moderatorDiscordId)+'</td></tr>').join("");
  const html='<section class="page-heading"><span class="eyebrow">TRUST & SAFETY</span><h1>Moderation center.</h1><p>Issue and review warnings, timeouts, kicks and bans. Actions are executed by the connected bot and written to the audit log.</p></section>'+
