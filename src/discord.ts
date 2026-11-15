@@ -79,6 +79,26 @@ async function registerOwnerCommands(client: Client, guildId: string) {
     .addSubcommand(s => s.setName("unban").setDescription("Unban a Discord user")
       .addStringOption(o => o.setName("user-id").setDescription("Discord user ID").setRequired(true))
       .addStringOption(o => o.setName("reason").setDescription("Reason").setMaxLength(500).setRequired(false)))
+    .addSubcommand(s => s.setName("dm").setDescription("Send a direct message to a member")
+      .addUserOption(o => o.setName("member").setDescription("Member").setRequired(true))
+      .addStringOption(o => o.setName("message").setDescription("Message").setMaxLength(1900).setRequired(true)))
+    .addSubcommand(s => s.setName("channel-create").setDescription("Create a text or voice channel")
+      .addStringOption(o => o.setName("name").setDescription("Channel name").setMaxLength(90).setRequired(true))
+      .addStringOption(o => o.setName("kind").setDescription("Channel type").addChoices({name:"Text",value:"text"},{name:"Voice",value:"voice"}).setRequired(true))
+      .addStringOption(o => o.setName("topic").setDescription("Optional channel topic").setMaxLength(1024).setRequired(false)))
+    .addSubcommand(s => s.setName("channel-delete").setDescription("Delete a channel")
+      .addChannelOption(o => o.setName("channel").setDescription("Channel to delete").setRequired(true)))
+    .addSubcommand(s => s.setName("role-create").setDescription("Create a server role")
+      .addStringOption(o => o.setName("name").setDescription("Role name").setMaxLength(100).setRequired(true))
+      .addStringOption(o => o.setName("color").setDescription("Hex color such as #78a9ff").setRequired(false)))
+    .addSubcommand(s => s.setName("role-delete").setDescription("Delete a server role")
+      .addRoleOption(o => o.setName("role").setDescription("Role to delete").setRequired(true)))
+    .addSubcommand(s => s.setName("purge").setDescription("Bulk-delete recent messages")
+      .addChannelOption(o => o.setName("channel").setDescription("Text channel").addChannelTypes(ChannelType.GuildText).setRequired(true))
+      .addIntegerOption(o => o.setName("count").setDescription("Number of messages").setMinValue(2).setMaxValue(100).setRequired(true)))
+    .addSubcommand(s => s.setName("message-delete").setDescription("Delete a single message")
+      .addChannelOption(o => o.setName("channel").setDescription("Text channel").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
+      .addStringOption(o => o.setName("message-id").setDescription("Message ID").setRequired(true)))
     .addSubcommand(s => s.setName("sync").setDescription("Refresh the bot's server member cache"));
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_BOT_TOKEN!);
   await rest.put(Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, guildId), { body: [command.toJSON()] });
@@ -125,6 +145,66 @@ async function handleOwnerCommand(db: PrismaClient, client: Client, interaction:
     await channel.send({ content: message, allowedMentions: { parse: [] } });
     await log("discord.slash.announce", channel.id);
     await interaction.editReply("Announcement sent to <#" + channel.id + ">.");
+    return;
+  }
+  if (sub === "dm") {
+    const user = interaction.options.getUser("member", true);
+    const message = interaction.options.getString("message", true);
+    await user.send({ content: message, allowedMentions: { parse: [] } });
+    await log("discord.slash.dm", user.id);
+    await interaction.editReply("Direct message sent to " + user.tag + ".");
+    return;
+  }
+  if (sub === "channel-create") {
+    const name = interaction.options.getString("name", true).toLowerCase();
+    const kind = interaction.options.getString("kind", true);
+    if (!/^[a-z0-9_-]{1,90}$/.test(name)) throw new Error("Channel names must use lowercase letters, numbers, hyphens or underscores.");
+    const channel = await guild.channels.create({ name, type: kind === "voice" ? ChannelType.GuildVoice : ChannelType.GuildText, topic: interaction.options.getString("topic") || undefined });
+    await log("discord.slash.channel.create", channel.id);
+    await interaction.editReply("Created channel <#" + channel.id + ">.");
+    return;
+  }
+  if (sub === "channel-delete") {
+    const channel = interaction.options.getChannel("channel", true);
+    await channel.delete("Deleted by OKG platform owner");
+    await log("discord.slash.channel.delete", channel.id);
+    await interaction.editReply("Channel deleted.");
+    return;
+  }
+  if (sub === "role-create") {
+    const name = interaction.options.getString("name", true);
+    const color = interaction.options.getString("color") || undefined;
+    if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error("Use a six-digit hex color such as #78a9ff.");
+    const role = await guild.roles.create({ name, color, reason: "Created by OKG platform owner" });
+    await log("discord.slash.role.create", role.id);
+    await interaction.editReply("Created role **" + role.name + "** (" + role.id + ").");
+    return;
+  }
+  if (sub === "role-delete") {
+    const role = interaction.options.getRole("role", true);
+    if (!role.editable) throw new Error("That role is above the bot's highest role or cannot be managed.");
+    await role.delete("Deleted by OKG platform owner");
+    await log("discord.slash.role.delete", role.id);
+    await interaction.editReply("Role deleted.");
+    return;
+  }
+  if (sub === "purge") {
+    const channel = interaction.options.getChannel("channel", true);
+    const count = interaction.options.getInteger("count", true);
+    if (!channel.isTextBased() || !("bulkDelete" in channel)) throw new Error("That channel does not support bulk deletion.");
+    const deleted = await channel.bulkDelete(count, true);
+    await log("discord.slash.purge", channel.id, { count: deleted.size });
+    await interaction.editReply("Deleted " + deleted.size + " recent messages. Messages older than 14 days are skipped by Discord.");
+    return;
+  }
+  if (sub === "message-delete") {
+    const channel = interaction.options.getChannel("channel", true);
+    const messageId = interaction.options.getString("message-id", true);
+    if (!/^\d{15,22}$/.test(messageId) || !channel.isTextBased() || !("messages" in channel)) throw new Error("Invalid message ID or channel.");
+    const message = await channel.messages.fetch(messageId);
+    await message.delete();
+    await log("discord.slash.message.delete", messageId, { channelId: channel.id });
+    await interaction.editReply("Message deleted.");
     return;
   }
   if (sub === "role-add" || sub === "role-remove") {
