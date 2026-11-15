@@ -12,6 +12,7 @@ export const PERMISSIONS = [
 export type PortalPermission = typeof PERMISSIONS[number];
 
 export async function getPermissions(db: PrismaClient, user: User): Promise<Set<string>> {
+  if (!user.isGuildMember) return new Set();
   if (user.discordId === process.env.OWNER_DISCORD_USER_ID) return new Set(["*"]);
   const guildId = process.env.DISCORD_GUILD_ID;
   if (!guildId) return new Set();
