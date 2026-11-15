@@ -407,7 +407,7 @@ app.post("/applications/:id/notes", auth, requireOwner, async (req,res) => {
  res.redirect("/applications/"+applicationId);
 });
 
-app.use((err: unknown,req:Request,res:Response,_next:NextFunction)=>{console.error("Unhandled OKG Portal request error:",req.method,req.originalUrl,err);if(res.headersSent)return;res.status(500).send("Something went wrong. Please try again. The error has been recorded in Render logs.");});
+app.use((err: unknown,req:Request,res:Response,_next:NextFunction)=>{console.error("Unhandled OKG Portal request error:",req.method,req.path,err);if(res.headersSent)return;res.status(500).send("Something went wrong. Please try again. The error has been recorded in Render logs.");});
 async function main(){
  if(!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required.");
  if(process.env.NODE_ENV === "production" && (!process.env.DISCORD_CLIENT_ID || !process.env.DISCORD_CLIENT_SECRET || !process.env.DISCORD_BOT_TOKEN || !guildId || !process.env.OWNER_DISCORD_USER_ID)) throw new Error("Discord OAuth, bot, guild and owner environment variables must be configured before production startup.");
