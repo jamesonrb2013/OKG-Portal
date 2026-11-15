@@ -216,37 +216,58 @@ app.get("/members", auth, requirePermission("members:view"), async (req,res) => 
  page(res,"Member directory",html,user);
 });
 
-app.get("/control", auth, requirePermission("discord:manage"), async (req,res) => {
+app.get("/control", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const jobs=await db.discordAction.findMany({orderBy:{createdAt:"desc"},take:30});
+ const jobs=await db.discordAction.findMany({orderBy:{createdAt:"desc"},take:40});
  const rows=jobs.map(j=>"<tr><td>"+j.createdAt.toLocaleString()+"</td><td>"+escapeHtml(j.type)+"</td><td>"+escapeHtml(j.status)+"</td><td>"+escapeHtml(j.result||"Waiting for bot...")+"</td></tr>").join("");
- const html = `<section class="page-heading"><span class="eyebrow">PLATFORM OWNER · DISCORD OPERATIONS</span><h1>OKG Control Center.</h1><p>Submit administrative actions here. The connected OKG bot executes them in your official Discord server.</p></section>
- <section class="panel"><span class="eyebrow">SEND AN ANNOUNCEMENT</span><h2>Post a channel message</h2><form method="post" action="/control/actions"><input type="hidden" name="type" value="send_message"><label>Channel ID<input name="channelId" required pattern="[0-9]{15,22}"></label><label>Message<textarea name="message" required maxlength="1900" rows="4"></textarea></label><button class="button">Send through OKG bot</button></form></section>
- <section class="panel"><span class="eyebrow">MEMBER MANAGEMENT</span><h2>Manage a member role</h2><form method="post" action="/control/actions"><label>Action<select name="type"><option value="add_role">Add role</option><option value="remove_role">Remove role</option></select></label><label>Member Discord ID<input name="userId" required pattern="[0-9]{15,22}"></label><label>Role ID<input name="roleId" required pattern="[0-9]{15,22}"></label><button class="button">Submit role change</button></form></section>
- <section class="panel"><span class="eyebrow">MEMBER PROFILE</span><h2>Change a server nickname</h2><form method="post" action="/control/actions"><input type="hidden" name="type" value="set_nickname"><label>Member Discord ID<input name="userId" required pattern="[0-9]{15,22}"></label><label>New nickname<input name="nickname" maxlength="32" placeholder="Leave blank to reset"></label><button class="button">Update nickname</button></form></section>
- <section class="panel table-panel"><div class="panel-head"><div><span class="eyebrow">BOT EXECUTION LOG</span><h2>Recent actions</h2></div></div><div class="table-wrap"><table><thead><tr><th>Requested</th><th>Action</th><th>Status</th><th>Result</th></tr></thead><tbody>${rows || "<tr><td colspan=\"4\">No actions submitted yet.</td></tr>"}</tbody></table></div><p class="muted small">Actions are processed by the bot worker and recorded for accountability. The bot must have the required Discord permissions and role hierarchy.</p></section>`;
+ const id='<label>Discord user ID<input name="userId" required pattern="[0-9]{15,22}"></label>';
+ const reason='<label>Reason<input name="reason" maxlength="500" value="Requested through OKG Portal"></label>';
+ const html='<section class="page-heading"><span class="eyebrow">PLATFORM OWNER · DISCORD OPERATIONS</span><h1>OKG Control Center.</h1><p>Manage messages, members, roles and server structure through the connected bot.</p></section>'+
+ '<section class="content-grid"><article class="panel"><span class="eyebrow">COMMUNICATION</span><h2>Send a channel message</h2><form method="post" action="/control/actions"><input type="hidden" name="type" value="send_message"><label>Channel ID<input name="channelId" required pattern="[0-9]{15,22}"></label><label>Message<textarea name="message" required maxlength="1900" rows="4"></textarea></label><button class="button">Send message</button></form></article><article class="panel"><span class="eyebrow">DIRECT MESSAGE</span><h2>Message a member</h2><form method="post" action="/control/actions"><input type="hidden" name="type" value="send_dm">'+id+'<label>Message<textarea name="message" required maxlength="1900" rows="4"></textarea></label><button class="button">Send DM</button></form></article></section>'+
+ '<section class="content-grid"><article class="panel"><h2>Member roles</h2><form method="post" action="/control/actions"><label>Action<select name="type"><option value="add_role">Add role</option><option value="remove_role">Remove role</option></select></label>'+id+'<label>Role ID<input name="roleId" required pattern="[0-9]{15,22}"></label><button class="button">Apply role change</button></form></article><article class="panel"><h2>Nickname</h2><form method="post" action="/control/actions"><input type="hidden" name="type" value="set_nickname">'+id+'<label>New nickname<input name="nickname" maxlength="32" placeholder="Leave blank to reset"></label><button class="button">Update nickname</button></form></article></section>'+
+ '<section class="content-grid"><article class="panel"><h2>Moderation</h2><form method="post" action="/control/actions"><label>Action<select name="type"><option value="warn_member">Warn</option><option value="timeout_member">Timeout</option><option value="clear_timeout">Clear timeout</option><option value="kick_member">Kick</option><option value="ban_member">Ban</option><option value="unban_member">Unban</option></select></label>'+id+'<label>Timeout (minutes)<input type="number" name="minutes" min="1" max="40320" value="60"></label>'+reason+'<button class="button">Run moderation action</button></form></article><article class="panel"><h2>Message cleanup</h2><form method="post" action="/control/actions"><label>Action<select name="type"><option value="purge_messages">Bulk delete recent messages</option><option value="delete_message">Delete one message</option></select></label><label>Channel ID<input name="channelId" required pattern="[0-9]{15,22}"></label><label>Message ID (single delete only)<input name="messageId" pattern="[0-9]{15,22}"></label><label>Count (bulk delete only)<input name="count" type="number" min="2" max="100" value="10"></label><button class="button">Queue cleanup</button></form><p class="muted small">Discord bulk deletion cannot remove messages older than 14 days.</p></article></section>'+
+ '<section class="panel"><h2>Recent action jobs</h2><div class="table-wrap"><table><thead><tr><th>Requested</th><th>Action</th><th>Status</th><th>Result</th></tr></thead><tbody>'+(rows||"<tr><td colspan=\"4\">No actions submitted yet.</td></tr>")+'</tbody></table></div><p class="muted small">Queued actions are executed by the bot worker. Failed jobs include the Discord permission or hierarchy error returned by Discord.</p></section>';
  page(res,"OKG Control Center",html,user);
 });
-app.post("/control/actions", auth, requirePermission("discord:manage"), async (req,res) => {
+app.post("/control/actions", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const type=String(req.body.type||"");
- let payload: Record<string,string>;
- if(type==="send_message"){
-  const v=z.object({channelId:z.string().regex(/^\d{15,22}$/),message:z.string().trim().min(1).max(1900)}).safeParse(req.body);
-  if(!v.success) return res.status(400).send("Invalid channel ID or message.");
-  payload=v.data;
- } else if(type==="add_role"||type==="remove_role"){
-  const v=z.object({userId:z.string().regex(/^\d{15,22}$/),roleId:z.string().regex(/^\d{15,22}$/)}).safeParse(req.body);
-  if(!v.success) return res.status(400).send("Invalid member or role ID.");
-  payload=v.data;
- } else if(type==="set_nickname"){
-  const v=z.object({userId:z.string().regex(/^\d{15,22}$/),nickname:z.string().max(32).optional()}).safeParse(req.body);
-  if(!v.success) return res.status(400).send("Invalid member ID or nickname.");
-  payload=v.data;
- } else return res.status(400).send("Unsupported action.");
- const job=await db.discordAction.create({data:{type,payload:payload as any,requestedBy:user.id}});
- await audit(user.id,"discord.action.queued",job.id,{type});
- res.redirect("/control");
+ const type=z.enum(["send_message","send_dm","add_role","remove_role","set_nickname","warn_member","timeout_member","clear_timeout","kick_member","ban_member","unban_member","create_channel","delete_channel","create_role","delete_role","delete_message","purge_messages"]).safeParse(req.body.type);
+ if(!type.success) return res.status(400).send("Unsupported action.");
+ const id=z.string().regex(/^\d{15,22}$/);
+ const reason=z.string().trim().max(500).optional();
+ let payload:any={moderatorDiscordId:user.discordId};
+ const parsedType=type.data;
+ if(parsedType==="send_message"){
+  const v=z.object({channelId:id,message:z.string().trim().min(1).max(1900)}).safeParse(req.body);if(!v.success)return res.status(400).send("Invalid channel ID or message.");payload=v.data;
+ } else if(parsedType==="send_dm"){
+  const v=z.object({userId:id,message:z.string().trim().min(1).max(1900)}).safeParse(req.body);if(!v.success)return res.status(400).send("Invalid member ID or message.");payload=v.data;
+ } else if(parsedType==="add_role"||parsedType==="remove_role"){
+  const v=z.object({userId:id,roleId:id}).safeParse(req.body);if(!v.success)return res.status(400).send("Invalid member or role ID.");payload={...v.data,moderatorDiscordId:user.discordId};
+ } else if(parsedType==="set_nickname"){
+  const v=z.object({userId:id,nickname:z.string().max(32).optional()}).safeParse(req.body);if(!v.success)return res.status(400).send("Invalid member ID or nickname.");payload={...v.data,moderatorDiscordId:user.discordId};
+ } else if(["warn_member","timeout_member","clear_timeout","kick_member","ban_member","unban_member"].includes(parsedType)){
+  const v=z.object({userId:id,reason:z.string().trim().min(1).max(500).optional(),minutes:z.coerce.number().int().min(1).max(40320).optional()}).safeParse(req.body);
+  if(!v.success)return res.status(400).send("Invalid member ID, reason or timeout duration.");
+  payload={userId:v.data.userId,reason:v.data.reason||"No reason supplied.",moderatorDiscordId:user.discordId};
+  if(parsedType==="timeout_member"){if(!v.data.minutes)return res.status(400).send("Enter a timeout duration.");payload.durationSeconds=v.data.minutes*60;}
+ } else if(parsedType==="create_channel"){
+  const v=z.object({name:z.string().trim().min(1).max(90).regex(/^[a-z0-9_-]+$/),channelType:z.enum(["text","voice"]),topic:z.string().max(1024).optional()}).safeParse(req.body);
+  if(!v.success)return res.status(400).send("Invalid channel name or type.");payload=v.data;
+ } else if(parsedType==="delete_channel"){
+  const v=z.object({channelId:id}).safeParse(req.body);if(!v.success)return res.status(400).send("Invalid channel ID.");payload=v.data;
+ } else if(parsedType==="create_role"){
+  const v=z.object({name:z.string().trim().min(1).max(100),color:z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().or(z.literal(""))}).safeParse(req.body);
+  if(!v.success)return res.status(400).send("Invalid role name or color.");payload={name:v.data.name,color:v.data.color||undefined};
+ } else if(parsedType==="delete_role"){
+  const v=z.object({roleId:id}).safeParse(req.body);if(!v.success)return res.status(400).send("Invalid role ID.");payload=v.data;
+ } else if(parsedType==="delete_message"){
+  const v=z.object({channelId:id,messageId:id}).safeParse(req.body);if(!v.success)return res.status(400).send("Both channel ID and message ID are required.");payload=v.data;
+ } else if(parsedType==="purge_messages"){
+  const v=z.object({channelId:id,count:z.coerce.number().int().min(2).max(100)}).safeParse(req.body);if(!v.success)return res.status(400).send("Purge count must be between 2 and 100.");payload=v.data;
+ }
+ const job=await db.discordAction.create({data:{type:parsedType,payload,requestedBy:user.id}});
+ await audit(user.id,"discord.action.queued",job.id,{type:parsedType});
+ res.redirect(parsedType.includes("member")||["warn_member","timeout_member","clear_timeout","kick_member","ban_member","unban_member"].includes(parsedType)?"/moderation":"/control");
 });
 app.get("/audit", auth, requirePermission("audit:view"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
