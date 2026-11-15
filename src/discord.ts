@@ -21,7 +21,8 @@ export async function syncMember(db: PrismaClient, member: GuildMember) {
 }
 
 export async function startDiscordGateway(db: PrismaClient) {
-  if (!process.env.DISCORD_BOT_TOKEN || !process.env.DISCORD_GUILD_ID) {
+  const guildId = process.env.DISCORD_GUILD_ID;
+  if (!process.env.DISCORD_BOT_TOKEN || !guildId) {
     console.warn("Discord Gateway is not configured yet; add DISCORD_BOT_TOKEN and DISCORD_GUILD_ID.");
     return;
   }
