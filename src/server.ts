@@ -68,6 +68,14 @@ function requirePermission(permission: string) {
     next();
   };
 }
+
+function requireOwner(req: Request, res: Response, next: NextFunction) {
+  const user = (req as AuthedRequest).portalUser!;
+  if (!user || user.discordId !== process.env.OWNER_DISCORD_USER_ID) {
+    return page(res, "Owner access required", '<section class="panel narrow"><span class="eyebrow">OWNER ONLY</span><h1>This area is reserved for the OKG platform owner.</h1><p>Role-based staff permissions cannot grant access to platform-wide security settings.</p><a class="button" href="/dashboard">Back to portal</a></section>', user);
+  }
+  next();
+}
 function audit(actorId: string, action: string, subject?: string, details?: object) {
   return db.auditEvent.create({ data: { actorId, action, subject, details: details as any } });
 }
@@ -165,14 +173,14 @@ app.post("/applications/:id/status", auth, requirePermission("applications:revie
  await audit(user.id,"application.status.updated",applicationId,{status:status.data});
  res.redirect("/applications/"+applicationId);
 });
-app.get("/settings", auth, requirePermission("roles:manage"), async (req,res) => {
+app.get("/settings", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
  const mappings=await db.roleMapping.findMany({where:{guildId},orderBy:{permission:"asc"}});
  const rows=mappings.map(m=>`<tr><td><code>${escapeHtml(m.discordRoleId)}</code></td><td>${escapeHtml(m.permission)}</td><td><form method="post" action="/settings/roles/${m.id}/delete"><button class="text-button">Remove</button></form></td></tr>`).join("");
  const options=PERMISSIONS.map(p=>`<option value="${p}">${p}</option>`).join("");
  page(res,"Portal settings",`<section class="page-heading"><span class="eyebrow">PLATFORM OWNER</span><h1>Role synchronization.</h1><p>Map Discord role IDs to portal permissions. Changes take effect as soon as Discord role updates are received.</p></section><section class="panel"><div class="panel-head"><div><span class="eyebrow">OFFICIAL SERVER</span><h2>Role mappings</h2></div><span class="status">${mappings.length} mappings</span></div><form class="mapping-form" method="post" action="/settings/roles"><label>Discord role ID<input name="discordRoleId" required inputmode="numeric" pattern="[0-9]{15,22}" placeholder="123456789012345678"></label><label>Portal permission<select name="permission">${options}</select></label><button class="button" type="submit">Add mapping</button></form><div class="table-wrap"><table><thead><tr><th>Discord role ID</th><th>Portal permission</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="3">No mappings configured yet.</td></tr>'}</tbody></table></div><p class="muted small">Use Discord Developer Mode to copy role IDs. A role ID can have multiple permission mappings. Platform Owner access is never granted through this table.</p></section>`,user);
 });
-app.post("/settings/roles", auth, requirePermission("roles:manage"), async (req,res) => {
+app.post("/settings/roles", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
  const parsed=z.object({discordRoleId:z.string().regex(/^\d{15,22}$/),permission:z.enum(PERMISSIONS)}).safeParse(req.body);
  if(!parsed.success) return res.status(400).send("Invalid role ID or permission.");
@@ -180,7 +188,7 @@ app.post("/settings/roles", auth, requirePermission("roles:manage"), async (req,
  await audit(user.id,"role_mapping.created",parsed.data.discordRoleId,{permission:parsed.data.permission});
  res.redirect("/settings");
 });
-app.post("/settings/roles/:id/delete", auth, requirePermission("roles:manage"), async (req,res) => {
+app.post("/settings/roles/:id/delete", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
  const mappingId=String(req.params.id);
  const mapping=await db.roleMapping.findFirst({where:{id:mappingId,guildId}});
