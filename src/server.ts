@@ -46,7 +46,7 @@ app.use(session({
 app.use("/assets", express.static("public", { maxAge: "1h" }));
 
 function shell(title: string, content: string, user?: any) {
-  const nav = user ? `<nav><a href="/dashboard">Overview</a><a href="/members">Members</a><a href="/apply">Apply</a><a href="/applications">Review queue</a><a href="/settings">Role settings</a><a href="/audit">Audit</a><a href="/logout">Sign out</a></nav>` : "";
+  const nav = user ? `<nav><a href="/dashboard">Overview</a><a href="/members">Members</a><a href="/control">Control Center</a><a href="/apply">Apply</a><a href="/applications">Review queue</a><a href="/settings">Role settings</a><a href="/audit">Audit</a><a href="/logout">Sign out</a></nav>` : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b14"><title>${title} · OKG Portal</title><link rel="stylesheet" href="/assets/style.css"></head><body><div class="ambient"></div><header class="topbar"><a class="brand" href="/"><span class="brand-mark">O</span><span>ONE KID GAMING<small>OFFICIAL PORTAL</small></span></a>${nav}<div class="top-right">${user ? `<span class="user-chip">${escapeHtml(user.displayName || user.username)}</span>` : '<a class="button button-quiet" href="/auth/discord">Sign in</a>'}</div></header><main>${content}</main><footer>ONE KID GAMING <span>·</span> Official community platform</footer></body></html>`;
 }
 function escapeHtml(value: unknown): string { return String(value ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]!)); }
@@ -194,6 +194,39 @@ app.get("/members", auth, requirePermission("members:view"), async (req,res) => 
  const rows=members.map(m=>"<tr><td><b>"+escapeHtml(m.displayName||m.username)+"</b><small>@"+escapeHtml(m.username)+"</small></td><td><code>"+escapeHtml(m.discordId)+"</code></td><td>"+(m.isOwner?"Platform Owner":m.memberRoles.length+" synced roles")+"</td><td>"+m.lastLoginAt.toLocaleDateString()+"</td></tr>").join("");
  const html="<section class=\"page-heading\"><span class=\"eyebrow\">OFFICIAL COMMUNITY</span><h1>Member directory.</h1><p>Verified members of the official OKG Discord server. Directory access is controlled by Discord role permissions.</p></section><section class=\"panel table-panel\"><form method=\"get\" action=\"/members\" class=\"mapping-form\"><label>Search members<input name=\"q\" value=\""+escapeHtml(q)+"\" placeholder=\"Name, username or Discord ID\"></label><button class=\"button\" type=\"submit\">Search</button><a class=\"button button-quiet\" href=\"/members\">Clear</a></form><div class=\"table-wrap\"><table><thead><tr><th>Member</th><th>Discord ID</th><th>Portal roles</th><th>Last login</th></tr></thead><tbody>"+(rows||"<tr><td colspan=\"4\">No matching members found.</td></tr>")+"</tbody></table></div><p class=\"muted small\">Showing up to 100 matching verified members.</p></section>";
  page(res,"Member directory",html,user);
+});
+
+app.get("/control", auth, requirePermission("discord:manage"), async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const jobs=await db.discordAction.findMany({orderBy:{createdAt:"desc"},take:30});
+ const rows=jobs.map(j=>"<tr><td>"+j.createdAt.toLocaleString()+"</td><td>"+escapeHtml(j.type)+"</td><td>"+escapeHtml(j.status)+"</td><td>"+escapeHtml(j.result||"Waiting for bot...")+"</td></tr>").join("");
+ const html="<section class=\\"page-heading\\"><span class=\\"eyebrow\\">PLATFORM OWNER · DISCORD OPERATIONS</span><h1>OKG Control Center.</h1><p>Submit administrative actions here. The connected OKG bot executes them in your official Discord server.</p></section>"+
+ "<section class=\\"panel\\"><span class=\\"eyebrow\\">SEND AN ANNOUNCEMENT</span><h2>Post a channel message</h2><form method=\\"post\\" action=\\"/control/actions\\"><input type=\\"hidden\\" name=\\"type\\" value=\\"send_message\\"><label>Channel ID<input name=\\"channelId\\" required pattern=\\"[0-9]{15,22}\\"></label><label>Message<textarea name=\\"message\\" required maxlength=\\"1900\\" rows=\\"4\\"></textarea></label><button class=\\"button\\">Send through OKG bot</button></form></section>"+
+ "<section class=\\"panel\\"><span class=\\"eyebrow\\">MEMBER MANAGEMENT</span><h2>Manage a member's role</h2><form method=\\"post\\" action=\\"/control/actions\\"><label>Action<select name=\\"type\\"><option value=\\"add_role\\">Add role</option><option value=\\"remove_role\\">Remove role</option></select></label><label>Member Discord ID<input name=\\"userId\\" required pattern=\\"[0-9]{15,22}\\"></label><label>Role ID<input name=\\"roleId\\" required pattern=\\"[0-9]{15,22}\\"></label><button class=\\"button\\">Submit role change</button></form></section>"+
+ "<section class=\\"panel\\"><span class=\\"eyebrow\\">MEMBER PROFILE</span><h2>Change a server nickname</h2><form method=\\"post\\" action=\\"/control/actions\\"><input type=\\"hidden\\" name=\\"type\\" value=\\"set_nickname\\"><label>Member Discord ID<input name=\\"userId\\" required pattern=\\"[0-9]{15,22}\\"></label><label>New nickname<input name=\\"nickname\\" maxlength=\\"32\\" placeholder=\\"Leave blank to reset\"></label><button class=\\"button\\">Update nickname</button></form></section>"+
+ "<section class=\\"panel table-panel\\"><div class=\\"panel-head\\"><div><span class=\\"eyebrow\\">BOT EXECUTION LOG</span><h2>Recent actions</h2></div></div><div class=\\"table-wrap\\"><table><thead><tr><th>Requested</th><th>Action</th><th>Status</th><th>Result</th></tr></thead><tbody>"+(rows||"<tr><td colspan=\\"4\\">No actions submitted yet.</td></tr>")+"</tbody></table></div><p class=\\"muted small\\">Actions are processed by the bot worker and recorded for accountability. The bot must have the required Discord permissions and role hierarchy.</p></section>";
+ page(res,"OKG Control Center",html,user);
+});
+app.post("/control/actions", auth, requirePermission("discord:manage"), async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const type=String(req.body.type||"");
+ let payload: Record<string,string>;
+ if(type==="send_message"){
+  const v=z.object({channelId:z.string().regex(/^\d{15,22}$/),message:z.string().trim().min(1).max(1900)}).safeParse(req.body);
+  if(!v.success) return res.status(400).send("Invalid channel ID or message.");
+  payload=v.data;
+ } else if(type==="add_role"||type==="remove_role"){
+  const v=z.object({userId:z.string().regex(/^\d{15,22}$/),roleId:z.string().regex(/^\d{15,22}$/)}).safeParse(req.body);
+  if(!v.success) return res.status(400).send("Invalid member or role ID.");
+  payload=v.data;
+ } else if(type==="set_nickname"){
+  const v=z.object({userId:z.string().regex(/^\d{15,22}$/),nickname:z.string().max(32).optional()}).safeParse(req.body);
+  if(!v.success) return res.status(400).send("Invalid member ID or nickname.");
+  payload=v.data;
+ } else return res.status(400).send("Unsupported action.");
+ const job=await db.discordAction.create({data:{type,payload:payload as any,requestedBy:user.id}});
+ await audit(user.id,"discord.action.queued",job.id,{type});
+ res.redirect("/control");
 });
 app.get("/audit", auth, requirePermission("audit:view"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
