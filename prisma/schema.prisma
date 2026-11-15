@@ -14,6 +14,7 @@ model User {
   displayName String?
   avatar      String?
   isOwner     Boolean  @default(false)
+  isGuildMember Boolean @default(false)
   lastLoginAt DateTime @default(now())
   createdAt   DateTime @default(now())
   memberRoles MemberRole[]
