@@ -181,7 +181,7 @@ async function handleOwnerCommand(db: PrismaClient, client: Client, interaction:
     return;
   }
   if (sub === "sync") {
-    await guild.members.fetch({ force: true });
+    await guild.members.fetch();
     await log("discord.slash.sync", guild.id);
     await interaction.editReply("Member cache refreshed. Current member count: " + guild.memberCount + ".");
   }
