@@ -334,7 +334,13 @@ export async function startDiscordGateway(db: PrismaClient) {
     try { await registerOwnerCommands(client, guildId); }
     catch (error) { console.error("Slash command registration failed", error); }
   });
-  await client.login(process.env.DISCORD_BOT_TOKEN);
+  try {
+    await client.login(process.env.DISCORD_BOT_TOKEN);
+  } catch (error) {
+    activeClient = null;
+    try { client.destroy(); } catch {}
+    throw error;
+  }
   await db.discordAction.updateMany({
     where: { status: "processing", createdAt: { lt: new Date(Date.now() - 10 * 60 * 1000) } },
     data: { status: "failed", result: "Worker restarted before this action completed. Verify the Discord state before retrying.", processedAt: new Date() }
