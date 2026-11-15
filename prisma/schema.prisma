@@ -115,7 +115,7 @@ model PortalSetting {
 
 
 model PortalSession {
-  sid    String   @id @db.VarChar(255)
+  sid    String   @id(map: "portal_sessions_pkey") @db.VarChar
   sess   Json     @db.Json
   expire DateTime @db.Timestamp(6)
   @@index([expire], map: "IDX_session_expire")
