@@ -18,7 +18,11 @@ const guildId = process.env.DISCORD_GUILD_ID || "";
 if (process.env.NODE_ENV === "production" && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32)) throw new Error("SESSION_SECRET must be at least 32 characters in production.");
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const PgSession = connectPgSimple(session);
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined });
+// node-postgres 8.16+ interprets sslmode=require as certificate-verifying by default.
+// Aiven documents uselibpqcompat=true to preserve PostgreSQL/libpq SSL semantics for require.
+const sessionDatabaseUrl = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL) : null;
+if (sessionDatabaseUrl && process.env.NODE_ENV === "production") sessionDatabaseUrl.searchParams.set("uselibpqcompat", "true");
+const pool = new Pool({ connectionString: sessionDatabaseUrl?.toString() || process.env.DATABASE_URL });
 
 declare module "express-session" { interface SessionData { userId?: string; oauthState?: string } }
 type AuthedRequest = Request & { portalUser?: Awaited<ReturnType<typeof db.user.findUnique>> };
@@ -83,7 +87,8 @@ function audit(actorId: string, action: string, subject?: string, details?: obje
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "okg-portal" }));
 app.get("/", async (req, res) => {
-  const user = req.session.userId ? await db.user.findUnique({ where: { id: req.session.userId } }) : null;
+  const sessionUser = req.session.userId ? await db.user.findUnique({ where: { id: req.session.userId } }) : null;
+  const user = sessionUser?.discordId === process.env.OWNER_DISCORD_USER_ID ? sessionUser : null;
   page(res, "Home", `<section class="hero"><div class="hero-copy"><span class="eyebrow"><i></i> THE OFFICIAL OKG PLATFORM</span><h1>One community.<br><em>One place.</em></h1><p>Your central destination for OKG membership, staff applications, updates and community services.</p><div class="actions"><a class="button" href="${user ? "/dashboard" : "/auth/discord"}">${user ? "Open your portal" : "Continue with Discord"} <b>↗</b></a><a class="button button-quiet" href="https://discord.gg/nePR9dnuYm" target="_blank" rel="noreferrer">Join the community</a></div><div class="trust-row"><span>● Discord-connected identity</span><span>● Role-synced access</span><span>● Official OKG</span></div></div><div class="hero-art"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="core"><span>OKG</span><small>COMMUNITY</small></div><div class="float-card card-top"><span class="pulse"></span> ROLE SYNC <b>LIVE</b></div><div class="float-card card-bottom"><small>YOUR COMMUNITY</small><strong>ONE KID GAMING</strong><span>MEMBERS · STAFF · LEADERSHIP</span></div></div></section><section class="feature-grid"><article class="feature"><span class="feature-icon">01</span><h3>One connected identity</h3><p>Sign in with Discord and use your verified OKG membership across the portal.</p></article><article class="feature"><span class="feature-icon">02</span><h3>Applications, organized</h3><p>Submit applications and follow their progress through a central workflow.</p></article><article class="feature"><span class="feature-icon">03</span><h3>Permissions that follow you</h3><p>Portal access updates automatically when your mapped Discord roles change.</p></article></section>`, user);
 });
 app.get("/auth/discord", (req, res) => {
