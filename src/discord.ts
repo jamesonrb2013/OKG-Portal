@@ -256,6 +256,7 @@ async function handleOwnerCommand(db: PrismaClient, client: Client, interaction:
     const userId = interaction.options.getString("user-id", true);
     if (!/^\d{15,22}$/.test(userId)) throw new Error("Enter a valid Discord user ID.");
     await guild.bans.remove(userId, interaction.options.getString("reason") || "Unbanned by OKG platform owner");
+    await db.moderationCase.updateMany({ where: { guildId: guild.id, targetDiscordId: userId, type: "ban", active: true }, data: { active: false } });
     await log("discord.slash.unban", userId);
     await interaction.editReply("Unban completed for user ID " + userId + ".");
     return;
@@ -333,6 +334,10 @@ export async function startDiscordGateway(db: PrismaClient) {
     catch (error) { console.error("Slash command registration failed", error); }
   });
   await client.login(process.env.DISCORD_BOT_TOKEN);
+  await db.discordAction.updateMany({
+    where: { status: "processing", createdAt: { lt: new Date(Date.now() - 10 * 60 * 1000) } },
+    data: { status: "failed", result: "Worker restarted before this action completed. Verify the Discord state before retrying.", processedAt: new Date() }
+  });
   let processing = false;
   const processQueue = async () => {
     if (processing || !client.isReady()) return;
