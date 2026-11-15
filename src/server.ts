@@ -198,10 +198,26 @@ app.post("/applications/:id/status", auth, requirePermission("applications:revie
 });
 app.get("/settings", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const mappings=await db.roleMapping.findMany({where:{guildId},orderBy:{permission:"asc"}});
- const rows=mappings.map(m=>`<tr><td><code>${escapeHtml(m.discordRoleId)}</code></td><td>${escapeHtml(m.permission)}</td><td><form method="post" action="/settings/roles/${m.id}/delete"><button class="text-button">Remove</button></form></td></tr>`).join("");
- const options=PERMISSIONS.map(p=>`<option value="${p}">${p}</option>`).join("");
- page(res,"Portal settings",`<section class="page-heading"><span class="eyebrow">PLATFORM OWNER</span><h1>Role synchronization.</h1><p>Map Discord role IDs to portal permissions. Changes take effect as soon as Discord role updates are received.</p></section><section class="panel"><div class="panel-head"><div><span class="eyebrow">OFFICIAL SERVER</span><h2>Role mappings</h2></div><span class="status">${mappings.length} mappings</span></div><form class="mapping-form" method="post" action="/settings/roles"><label>Discord role ID<input name="discordRoleId" required inputmode="numeric" pattern="[0-9]{15,22}" placeholder="123456789012345678"></label><label>Portal permission<select name="permission">${options}</select></label><button class="button" type="submit">Add mapping</button></form><div class="table-wrap"><table><thead><tr><th>Discord role ID</th><th>Portal permission</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="3">No mappings configured yet.</td></tr>'}</tbody></table></div><p class="muted small">Use Discord Developer Mode to copy role IDs. A role ID can have multiple permission mappings. Platform Owner access is never granted through this table.</p></section>`,user);
+ const [mappings,bannerSetting]=await Promise.all([
+  db.roleMapping.findMany({where:{guildId},orderBy:{permission:"asc"}}),
+  db.portalSetting.findUnique({where:{key:"site_banner"}})
+ ]);
+ const rows=mappings.map(m=>'<tr><td><code>'+escapeHtml(m.discordRoleId)+'</code></td><td>'+escapeHtml(m.permission)+'</td><td><form method="post" action="/settings/roles/'+m.id+'/delete"><button class="text-button">Remove</button></form></td></tr>').join("");
+ const options=PERMISSIONS.map(p=>'<option value="'+p+'">'+p+'</option>').join("");
+ const banner=(bannerSetting?.value||{}) as {enabled?:boolean;message?:string};
+ const status=getDiscordStatus();
+ const html='<section class="page-heading"><span class="eyebrow">PLATFORM OWNER</span><h1>Platform settings.</h1><p>Manage portal presentation, role synchronization and access configuration.</p></section>'+
+ '<section class="content-grid"><article class="panel"><span class="eyebrow">PORTAL ANNOUNCEMENT</span><h2>Homepage banner</h2><form method="post" action="/settings/portal"><label>Banner message<textarea name="message" maxlength="300" rows="3">'+escapeHtml(banner.message||"")+'</textarea></label><label><input style="display:inline;width:auto;margin-right:8px" type="checkbox" name="enabled" value="yes" '+(banner.enabled?'checked':'')+'>Show banner on homepage</label><button class="button">Save portal settings</button></form></article><article class="panel"><span class="eyebrow">CONNECTED SYSTEMS</span><h2>Discord connection</h2><p>Bot status: <b>'+(status.online?'Online':'Offline')+'</b></p><p>Slash commands: <b>'+(status.commandsRegistered?'Registered':'Pending')+'</b></p><p class="muted small">The platform owner ID is enforced by the server and cannot be changed through role mappings.</p><a href="/bot">Open bot operations →</a></article></section>'+
+ '<section class="panel"><div class="panel-head"><div><span class="eyebrow">OFFICIAL SERVER</span><h2>Discord role mappings</h2></div><span class="status">'+mappings.length+' mappings</span></div><form class="mapping-form" method="post" action="/settings/roles"><label>Discord role ID<input name="discordRoleId" required inputmode="numeric" pattern="[0-9]{15,22}" placeholder="123456789012345678"></label><label>Portal permission<select name="permission">'+options+'</select></label><button class="button" type="submit">Add mapping</button></form><div class="table-wrap"><table><thead><tr><th>Discord role ID</th><th>Portal permission</th><th></th></tr></thead><tbody>'+(rows||'<tr><td colspan="3">No mappings configured yet.</td></tr>')+'</tbody></table></div><p class="muted small">Role mappings are retained for future staff access. While the private beta is active, only the configured platform owner can access the portal.</p></section>';
+ page(res,"Portal settings",html,user);
+});
+app.post("/settings/portal", auth, requireOwner, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const parsed=z.object({message:z.string().max(300).optional(),enabled:z.enum(["yes"]).optional()}).safeParse(req.body);
+ if(!parsed.success)return res.status(400).send("Invalid portal settings.");
+ await db.portalSetting.upsert({where:{key:"site_banner"},create:{key:"site_banner",value:{message:parsed.data.message||"",enabled:parsed.data.enabled==="yes"}},update:{value:{message:parsed.data.message||"",enabled:parsed.data.enabled==="yes"}}});
+ await audit(user.id,"portal.banner.updated",undefined,{enabled:parsed.data.enabled==="yes"});
+ res.redirect("/settings");
 });
 app.post("/settings/roles", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
