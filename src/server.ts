@@ -53,7 +53,10 @@ function escapeHtml(value: unknown): string { return String(value ?? "").replace
 function page(res: Response, title: string, content: string, user?: any) { res.type("html").send(shell(title, content, user)); }
 async function auth(req: Request, res: Response, next: NextFunction) {
   const user = req.session.userId ? await db.user.findUnique({ where: { id: req.session.userId } }) : null;
-  if (!user) return res.redirect("/?signin=1");
+  if (!user || !user.isGuildMember) {
+    if (req.session.userId) req.session.destroy(() => {});
+    return res.redirect("/?signin=1");
+  }
   (req as AuthedRequest).portalUser = user;
   next();
 }
@@ -100,8 +103,8 @@ app.get("/auth/discord/callback", async (req, res) => {
     const owner = profile.id === process.env.OWNER_DISCORD_USER_ID;
     const user = await db.user.upsert({
       where: { discordId: profile.id },
-      create: { discordId: profile.id, username: profile.username, displayName: profile.global_name, avatar: profile.avatar, isOwner: owner },
-      update: { username: profile.username, displayName: profile.global_name, avatar: profile.avatar, isOwner: owner, lastLoginAt: new Date() }
+      create: { discordId: profile.id, username: profile.username, displayName: profile.global_name, avatar: profile.avatar, isOwner: owner, isGuildMember: true },
+      update: { username: profile.username, displayName: profile.global_name, avatar: profile.avatar, isOwner: owner, isGuildMember: true, lastLoginAt: new Date() }
     });
     await db.$transaction([
       db.memberRole.deleteMany({ where: { userId: user.id, guildId } }),
