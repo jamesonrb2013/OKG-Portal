@@ -89,3 +89,26 @@ model DiscordAction {
   requester   User     @relation(fields: [requestedBy], references: [id], onDelete: Cascade)
   @@index([status, createdAt])
 }
+
+
+model ModerationCase {
+  id                String   @id @default(cuid())
+  guildId           String
+  targetDiscordId   String
+  moderatorDiscordId String
+  type              String
+  reason            String
+  durationSeconds   Int?
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  expiresAt         DateTime?
+  @@index([guildId, targetDiscordId, createdAt])
+  @@index([guildId, type, createdAt])
+}
+
+model PortalSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+}
