@@ -62,6 +62,9 @@ async function auth(req: Request, res: Response, next: NextFunction) {
   const bannerSetting = await db.portalSetting.findUnique({ where: { key: "site_banner" } });
   const banner = (bannerSetting?.value || {}) as { enabled?: boolean; message?: string };
   const bannerHtml = banner.enabled && banner.message ? '<div class="panel narrow"><span class="eyebrow">OFFICIAL OKG UPDATE</span><p>'+escapeHtml(banner.message)+'</p></div>' : '';
+  const bannerSetting = await db.portalSetting.findUnique({ where: { key: "site_banner" } });
+  const banner = (bannerSetting?.value || {}) as { enabled?: boolean; message?: string };
+  const bannerHtml = banner.enabled && banner.message ? '<div class="panel narrow"><span class="eyebrow">OFFICIAL OKG UPDATE</span><p>'+escapeHtml(banner.message)+'</p></div>' : '';
   if (!user || !user.isGuildMember || user.discordId !== process.env.OWNER_DISCORD_USER_ID) {
     if (req.session.userId) req.session.destroy(() => {});
     return page(res, "Portal access restricted", '<section class="panel narrow"><span class="eyebrow">PRIVATE OWNER ACCESS</span><h1>OKG Portal is currently private.</h1><p>Only the platform owner can use an account right now. Any previous non-owner sessions have been signed out.</p><a class="button" href="/">Return home</a></section>');
