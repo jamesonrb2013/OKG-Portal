@@ -42,7 +42,7 @@ Required environment variables:
 The intended web service is `okg-portal` in the **Okg Portal** Render account / **My Workspace** workspace.
 - Runtime: Node
 - Build: `npm install && npm run build && npm run db:generate`
-- Start: `npm run db:deploy && npm start`
+- Start: `npm start` (runs `prisma db push` before launching the app)
 - Health check: `/health`
 - Custom domain: `portal.onekidgaming.com`
 
