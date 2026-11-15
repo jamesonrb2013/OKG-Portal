@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  discordId   String   @unique
+  username    String
+  displayName String?
+  avatar      String?
+  isOwner     Boolean  @default(false)
+  lastLoginAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  memberRoles MemberRole[]
+  applications Application[]
+  auditEvents AuditEvent[]
+}
+
+model MemberRole {
+  id          String   @id @default(cuid())
+  userId      String
+  guildId     String
+  discordRoleId String
+  syncedAt    DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, guildId, discordRoleId])
+  @@index([guildId, discordRoleId])
+}
+
+model RoleMapping {
+  id             String   @id @default(cuid())
+  guildId        String
+  discordRoleId  String
+  permission     String
+  createdAt      DateTime @default(now())
+  @@unique([guildId, discordRoleId, permission])
+  @@index([guildId, permission])
+}
+
+model Application {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String   @default("staff")
+  status      String   @default("submitted")
+  answers     Json
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notes       ApplicationNote[]
+  @@index([status, submittedAt])
+}
+
+model ApplicationNote {
+  id            String   @id @default(cuid())
+  applicationId String
+  authorId      String
+  body          String
+  createdAt     DateTime @default(now())
+  application  Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  subject   String?
+  details   Json?
+  createdAt DateTime @default(now())
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([createdAt])
+}
