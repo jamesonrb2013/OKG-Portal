@@ -13,7 +13,7 @@ import crypto from "node:crypto";
 const db = new PrismaClient();
 const app = express();
 const port = Number(process.env.PORT || 10000);
-const baseUrl = process.env.APP_BASE_URL || "http://localhost:10000";
+const baseUrl = process.env.APP_BASE_URL || (process.env.NODE_ENV === "production" ? "https://portal.onekidgaming.com" : "http://localhost:10000");
 const guildId = process.env.DISCORD_GUILD_ID || "";
 if (process.env.NODE_ENV === "production" && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32)) throw new Error("SESSION_SECRET must be at least 32 characters in production.");
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
@@ -409,16 +409,41 @@ app.post("/applications/:id/notes", auth, requireOwner, async (req,res) => {
 
 // Unknown routes receive a branded 404 page instead of Express's default "Cannot GET" response.
 app.use((req: Request, res: Response) => {
-  console.info("OKG Portal route not found:", req.method, req.originalUrl);
+  console.info("OKG Portal route not found:", req.method, req.path);
   res.status(404);
-  page(res, "Page not found", '<section class="panel narrow" style="text-align:center"><span class="eyebrow">ERROR 404 · PAGE NOT FOUND</span><h1 style="font-size:clamp(42px,7vw,64px);letter-spacing:-2px;margin:22px 0">This page is off the map.</h1><p>The page you are looking for does not exist, may have moved, or is not available at this address.</p><div class="actions" style="justify-content:center"><a class="button" href="/">Return to portal home <b>↗</b></a><a class="button button-quiet" href="https://onekidgaming.com/">Visit OKG</a></div><p class="muted small" style="margin-top:24px">Requested address: '+escapeHtml(req.originalUrl)+'</p></section>');
+  page(res, "Page not found", '<section class="panel narrow" style="text-align:center"><span class="eyebrow">ERROR 404 · PAGE NOT FOUND</span><h1 style="font-size:clamp(42px,7vw,64px);letter-spacing:-2px;margin:22px 0">This page is off the map.</h1><p>The page you are looking for does not exist, may have moved, or is not available at this address.</p><div class="actions" style="justify-content:center"><a class="button" href="/">Return to portal home <b>↗</b></a><a class="button button-quiet" href="https://onekidgaming.com/">Visit OKG</a></div><p class="muted small" style="margin-top:24px">Requested address: '+escapeHtml(req.path)+'</p></section>');
 });
 
 app.use((err: unknown,req:Request,res:Response,_next:NextFunction)=>{console.error("Unhandled OKG Portal request error:",req.method,req.path,err);if(res.headersSent)return;res.status(500).send("Something went wrong. Please try again. The error has been recorded in Render logs.");});
+async function connectDiscordWithRetry() {
+  let attempt = 0;
+  while (true) {
+    try {
+      await startDiscordGateway(db);
+      return;
+    } catch (error) {
+      attempt += 1;
+      console.error("Discord gateway connection failed; the web portal will remain online and the bot will retry.", error);
+      const delay = Math.min(60_000, 5_000 * attempt);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 async function main(){
  if(!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required.");
- if(process.env.NODE_ENV === "production" && (!process.env.DISCORD_CLIENT_ID || !process.env.DISCORD_CLIENT_SECRET || !process.env.DISCORD_BOT_TOKEN || !guildId || !process.env.OWNER_DISCORD_USER_ID)) throw new Error("Discord OAuth, bot, guild and owner environment variables must be configured before production startup.");
- await startDiscordGateway(db);
- app.listen(port,()=>console.log(`OKG Portal listening on ${port}`));
+ await new Promise<void>((resolve, reject) => {
+   const server = app.listen(port, () => {
+     console.log(`OKG Portal listening on ${port}`);
+     resolve();
+   });
+   server.once("error", reject);
+ });
+ const discordConfigured = Boolean(process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET && process.env.DISCORD_BOT_TOKEN && guildId && process.env.OWNER_DISCORD_USER_ID);
+ if (discordConfigured) {
+   void connectDiscordWithRetry();
+ } else {
+   console.warn("Discord integration is not fully configured. The portal web service is online; Discord sign-in and bot operations will remain unavailable until configuration is complete.");
+ }
 }
-main().catch(error=>{console.error(error);process.exit(1);});
+main().catch(error=>{console.error("Fatal OKG Portal startup error:",error);process.exit(1);});
