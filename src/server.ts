@@ -140,24 +140,30 @@ app.post("/apply", auth, async (req,res) => {
 });
 app.get("/applications", auth, requirePermission("applications:view"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const apps=await db.application.findMany({include:{user:true},orderBy:{submittedAt:"desc"},take:100});
- const rows=apps.map(a=>`<tr><td><b>${escapeHtml(a.user.displayName||a.user.username)}</b><small>${escapeHtml(a.user.discordId)}</small></td><td>${escapeHtml(a.type)}</td><td><span class="status">${escapeHtml(a.status)}</span></td><td>${a.submittedAt.toLocaleDateString()}</td><td><a href="/applications/${a.id}">Open →</a></td></tr>`).join("");
+ const apps=await db.application.findMany({orderBy:{submittedAt:"desc"},take:100});
+ const applicants=await db.user.findMany({where:{id:{in:[...new Set(apps.map(a=>a.userId))]}}});
+ const applicantById=new Map(applicants.map(applicant=>[applicant.id,applicant]));
+ const rows=apps.map(a=>`<tr><td><b>${escapeHtml(applicantById.get(a.userId)?.displayName||applicantById.get(a.userId)?.username||"Unknown user")}</b><small>${escapeHtml(applicantById.get(a.userId)?.discordId||"")}</small></td><td>${escapeHtml(a.type)}</td><td><span class="status">${escapeHtml(a.status)}</span></td><td>${a.submittedAt.toLocaleDateString()}</td><td><a href="/applications/${a.id}">Open →</a></td></tr>`).join("");
  page(res,"Application review",`<section class="page-heading"><span class="eyebrow">STAFF WORKSPACE</span><h1>Application review.</h1><p>Private queue for authorized application staff.</p></section><section class="panel table-panel"><table><thead><tr><th>Applicant</th><th>Type</th><th>Status</th><th>Submitted</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5">No applications yet.</td></tr>'}</tbody></table></section>`,user);
 });
 app.get("/applications/:id", auth, requirePermission("applications:review"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const a=await db.application.findUnique({where:{id:req.params.id},include:{user:true,notes:true}});
+ const applicationId=String(req.params.id);
+ const a=await db.application.findUnique({where:{id:applicationId}});
  if(!a) return res.status(404).send("Application not found");
+ const applicant=await db.user.findUnique({where:{id:a.userId}});
+ if(!applicant) return res.status(404).send("Applicant not found");
  const answers=a.answers as Record<string,string>;
- page(res,"Review application",`<section class="page-heading"><span class="eyebrow">APPLICATION DETAIL</span><h1>${escapeHtml(a.type)} application</h1><p>Submitted by ${escapeHtml(a.user.displayName||a.user.username)} · ${a.submittedAt.toLocaleString()}</p></section><section class="panel"><h2>Applicant responses</h2><h3>Motivation</h3><p class="answer">${escapeHtml(answers.motivation)}</p><h3>Experience</h3><p class="answer">${escapeHtml(answers.experience)}</p><h3>Additional information</h3><p class="answer">${escapeHtml(answers.additional||"Not provided")}</p><form method="post" action="/applications/${a.id}/status" class="inline-form"><label>Decision<select name="status"><option value="submitted">Submitted</option><option value="reviewing">Reviewing</option><option value="accepted">Accepted</option><option value="declined">Declined</option></select></label><button class="button" type="submit">Update status</button></form></section>`,user);
+ page(res,"Review application",`<section class="page-heading"><span class="eyebrow">APPLICATION DETAIL</span><h1>${escapeHtml(a.type)} application</h1><p>Submitted by ${escapeHtml(applicant.displayName||applicant.username)} · ${a.submittedAt.toLocaleString()}</p></section><section class="panel"><h2>Applicant responses</h2><h3>Motivation</h3><p class="answer">${escapeHtml(answers.motivation)}</p><h3>Experience</h3><p class="answer">${escapeHtml(answers.experience)}</p><h3>Additional information</h3><p class="answer">${escapeHtml(answers.additional||"Not provided")}</p><form method="post" action="/applications/${applicationId}/status" class="inline-form"><label>Decision<select name="status"><option value="submitted">Submitted</option><option value="reviewing">Reviewing</option><option value="accepted">Accepted</option><option value="declined">Declined</option></select></label><button class="button" type="submit">Update status</button></form></section>`,user);
 });
 app.post("/applications/:id/status", auth, requirePermission("applications:review"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
+ const applicationId=String(req.params.id);
  const status=z.enum(["submitted","reviewing","accepted","declined"]).safeParse(req.body.status);
  if(!status.success) return res.status(400).send("Invalid status");
- await db.application.update({where:{id:req.params.id},data:{status:status.data}});
- await audit(user.id,"application.status.updated",req.params.id,{status:status.data});
- res.redirect("/applications/"+req.params.id);
+ await db.application.update({where:{id:applicationId},data:{status:status.data}});
+ await audit(user.id,"application.status.updated",applicationId,{status:status.data});
+ res.redirect("/applications/"+applicationId);
 });
 app.get("/settings", auth, requirePermission("roles:manage"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
@@ -176,7 +182,8 @@ app.post("/settings/roles", auth, requirePermission("roles:manage"), async (req,
 });
 app.post("/settings/roles/:id/delete", auth, requirePermission("roles:manage"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const mapping=await db.roleMapping.findFirst({where:{id:req.params.id,guildId}});
+ const mappingId=String(req.params.id);
+ const mapping=await db.roleMapping.findFirst({where:{id:mappingId,guildId}});
  if(mapping){await db.roleMapping.delete({where:{id:mapping.id}});await audit(user.id,"role_mapping.deleted",mapping.discordRoleId,{permission:mapping.permission});}
  res.redirect("/settings");
 });
