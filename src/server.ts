@@ -315,12 +315,26 @@ app.get("/bot", auth, requireOwner, async (req,res) => {
  const jobs=await db.discordAction.findMany({orderBy:{createdAt:"desc"},take:12});
  const counts=await db.discordAction.groupBy({by:["status"],_count:{_all:true}});
  const count=(key:string)=>counts.find(x=>x.status===key)?._count._all||0;
- const rows=jobs.map(j=>'<tr><td>'+j.createdAt.toLocaleString()+'</td><td>'+escapeHtml(j.type)+'</td><td>'+escapeHtml(j.status)+'</td><td>'+escapeHtml(j.result||"Waiting for worker")+'</td></tr>').join("");
+ const rows=jobs.map(j=>'<tr><td>'+j.createdAt.toLocaleString()+'</td><td>'+escapeHtml(j.type)+'</td><td>'+escapeHtml(j.status)+'</td><td>'+escapeHtml(j.result||"Waiting for worker")+'</td><td>'+(j.status==="failed"?'<form method="post" action="/bot/actions/'+j.id+'/retry"><button class="text-button">Retry</button></form>':j.status==="queued"?'<form method="post" action="/bot/actions/'+j.id+'/cancel"><button class="text-button">Cancel</button></form>':'—')+'</td></tr>').join("");
  const html='<section class="page-heading"><span class="eyebrow">SYSTEMS · DISCORD GATEWAY</span><h1>Bot operations.</h1><p>Live connection state, command registration and action worker activity.</p></section>'+
  '<section class="stat-grid"><article class="stat"><small>GATEWAY</small><strong>'+(status.online?'Online':'Offline')+'</strong><span>'+(status.username?escapeHtml(status.username):'No active bot session')+'</span></article><article class="stat"><small>LATENCY</small><strong>'+(status.ping===null?'—':status.ping+' ms')+'</strong><span>Discord WebSocket heartbeat</span></article><article class="stat"><small>SLASH COMMANDS</small><strong>'+(status.commandsRegistered?'Registered':'Not registered')+'</strong><span>Guild-scoped /okg command group</span></article></section>'+
  '<section class="content-grid"><article class="panel"><span class="eyebrow">WORK QUEUE</span><h2>Action worker</h2><div class="list-row"><b>Queued</b><span class="status">'+count("queued")+'</span></div><div class="list-row"><b>Processing</b><span class="status">'+count("processing")+'</span></div><div class="list-row"><b>Completed</b><span class="status">'+count("completed")+'</span></div><div class="list-row"><b>Failed</b><span class="status">'+count("failed")+'</span></div><p class="muted small">The worker runs inside the same Render service as the portal.</p></article><article class="panel"><span class="eyebrow">REGISTERED COMMANDS</span><h2>/okg</h2><p>ping · server · member · announce · role-add · role-remove · nickname · warn · timeout · clear-timeout · kick · ban · unban · sync</p><p class="muted small">Every command checks the configured owner Discord user ID on the server before executing.</p></article></section>'+
- '<section class="panel table-panel"><h2>Recent bot jobs</h2><div class="table-wrap"><table><thead><tr><th>Requested</th><th>Action</th><th>Status</th><th>Result</th></tr></thead><tbody>'+(rows||'<tr><td colspan="4">No jobs recorded.</td></tr>')+'</tbody></table></div></section>';
+ '<section class="panel table-panel"><h2>Recent bot jobs</h2><div class="table-wrap"><table><thead><tr><th>Requested</th><th>Action</th><th>Status</th><th>Result</th><th></th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">No jobs recorded.</td></tr>')+'</tbody></table></div></section>';
  page(res,"Bot operations",html,user);
+});
+app.post("/bot/actions/:id/retry", auth, requireOwner, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const id=String(req.params.id);
+ const updated=await db.discordAction.updateMany({where:{id,status:"failed"},data:{status:"queued",result:null,processedAt:null}});
+ if(updated.count) await audit(user.id,"discord.action.retried",id);
+ res.redirect("/bot");
+});
+app.post("/bot/actions/:id/cancel", auth, requireOwner, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const id=String(req.params.id);
+ const updated=await db.discordAction.updateMany({where:{id,status:"queued"},data:{status:"canceled",result:"Canceled by platform owner.",processedAt:new Date()}});
+ if(updated.count) await audit(user.id,"discord.action.canceled",id);
+ res.redirect("/bot");
 });
 app.get("/server", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
