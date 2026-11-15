@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "Official One Kid Gaming member, staff and administration portal",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "prisma db push && node dist/server.js",
     "db:deploy": "prisma db push",
     "db:generate": "prisma generate"
   },
