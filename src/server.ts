@@ -105,6 +105,11 @@ app.get("/auth/discord/callback", async (req, res) => {
     const profileResponse = await fetch("https://discord.com/api/users/@me", { headers: { Authorization: "Bearer " + token.access_token } });
     if (!profileResponse.ok) throw new Error("Could not retrieve Discord profile");
     const profile = await profileResponse.json() as { id: string; username: string; global_name?: string; avatar?: string };
+    // Temporary closed beta: only the configured platform owner may create or use a portal account.
+    // This check runs before membership lookup or any database account write.
+    if (!process.env.OWNER_DISCORD_USER_ID || profile.id !== process.env.OWNER_DISCORD_USER_ID) {
+      return page(res, "Portal access restricted", '<section class="panel narrow"><span class="eyebrow">PRIVATE OWNER ACCESS</span><h1>OKG Portal is currently private.</h1><p>Account registration and sign-in are temporarily restricted to the platform owner. Please check back when access opens.</p><a class="button" href="/">Return home</a></section>');
+    }
     const memberResponse = await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${profile.id}`, { headers: { Authorization: "Bot " + process.env.DISCORD_BOT_TOKEN } });
     if (!memberResponse.ok) return page(res, "Server membership required", '<section class="panel narrow"><span class="eyebrow">MEMBERSHIP CHECK</span><h1>Join the official OKG Discord first.</h1><p>We could not verify your membership in the official server. Join OKG, then sign in again.</p><a class="button" href="https://discord.gg/nePR9dnuYm">Join OKG Discord</a></section>');
     const member = await memberResponse.json() as { roles: string[] };
