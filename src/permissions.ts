@@ -6,7 +6,8 @@ export const PERMISSIONS = [
   "applications:review",
   "members:view",
   "roles:manage",
-  "audit:view"
+  "audit:view",
+  "discord:manage"
 ] as const;
 
 export type PortalPermission = typeof PERMISSIONS[number];
