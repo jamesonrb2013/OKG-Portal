@@ -20,6 +20,7 @@ model User {
   memberRoles MemberRole[]
   applications Application[]
   auditEvents AuditEvent[]
+  requestedActions DiscordAction[]
 }
 
 model MemberRole {
@@ -74,4 +75,17 @@ model AuditEvent {
   createdAt DateTime @default(now())
   actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
   @@index([createdAt])
+}
+
+model DiscordAction {
+  id          String   @id @default(cuid())
+  type        String
+  payload     Json
+  status      String   @default("queued")
+  result      String?
+  requestedBy String
+  createdAt   DateTime @default(now())
+  processedAt DateTime?
+  requester   User     @relation(fields: [requestedBy], references: [id], onDelete: Cascade)
+  @@index([status, createdAt])
 }
