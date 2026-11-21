@@ -20,7 +20,9 @@ export async function getPermissions(db: PrismaClient, user: User): Promise<Set<
   const mappings = roleIds.length ? await db.roleMapping.findMany({
     where: { guildId, discordRoleId: { in: roleIds } }, select: { permission: true }
   }) : [];
-  return new Set(["portal:member", ...mappings.map(m => m.permission)]);
+  const permissions = new Set(["portal:member", ...mappings.map(m => m.permission)]);
+  if (permissions.has("applications:review")) permissions.add("applications:view");
+  return permissions;
 }
 export function hasPermission(permissions: Set<string>, permission: string): boolean {
   return permissions.has("*") || permissions.has(permission);
