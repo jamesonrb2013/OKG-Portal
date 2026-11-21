@@ -164,7 +164,7 @@ app.get("/dashboard", auth, async (req,res) => {
  const list=(items:any[],fn:(x:any)=>string)=>items.map(fn).join("")||'<p class="muted">Nothing to show right now.</p>';
  const html='<section class="page-heading"><span class="eyebrow">MEMBER DASHBOARD</span><h1>Welcome back, '+escapeHtml(user.displayName||user.username)+'.</h1><p>Your OKG community hub. Play, compete and stay connected.</p></section>'+
  '<section class="stat-grid"><article class="stat"><small>YOUR LEVEL</small><strong>'+user.level+'</strong><span>'+user.xp+' XP</span></article><article class="stat"><small>MEMBER SINCE</small><strong>'+user.createdAt.toLocaleDateString()+'</strong><span>OFFICIAL MEMBER</span></article><article class="stat"><small>YOUR ACCESS</small><strong>'+(user.isOwner?'Platform Owner':'Member')+'</strong><span>SYNCED FROM DISCORD</span></article></section>'+
- '<section class="content-grid"><div><section class="panel"><h2>Community announcements</h2>'+list(news,x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+escapeHtml(x.body)+'</small></span></div>')+'</section><br><section class="panel"><h2>Upcoming events</h2>'+list(events,x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+x.startsAt.toLocaleString()+'</small></span></div>')+'</section></div><div><section class="panel"><h2>Active giveaways</h2>'+list(giveaways,x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+escapeHtml(x.prize)+' · Ends '+x.endsAt.toLocaleString()+'</small></span><a href="/giveaways">View</a></div>')+'</section><br><section class="panel"><h2>Top members</h2>'+list(top,(x,i)=>'<div class="list-row"><span><b>'+escapeHtml(x.displayName||x.username)+'</b><small>Level '+x.level+'</small></span><span class="status">'+x.xp+' XP</span></div>')+'</section></div></section>';
+ '<section class="content-grid"><div><section class="panel"><h2>Community announcements</h2>'+list(news,x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+escapeHtml(x.body)+'</small></span></div>')+'</section><br><section class="panel"><h2>Upcoming events</h2>'+list(events,x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+x.startsAt.toLocaleString()+'</small></span></div>')+'</section></div><div><section class="panel"><h2>Active giveaways</h2>'+list(giveaways,x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+escapeHtml(x.prize)+' · Ends '+x.endsAt.toLocaleString()+'</small></span><a href="/giveaways">View</a></div>')+'</section><br><section class="panel"><h2>Top members</h2>'+list(top,x=>'<div class="list-row"><span><b>'+escapeHtml(x.displayName||x.username)+'</b><small>Level '+x.level+'</small></span><span class="status">'+x.xp+' XP</span></div>')+'</section></div></section>';
  page(res,"Member Home",html,user);
 });
 app.get("/apply", auth, (req, res) => {
@@ -189,7 +189,7 @@ app.get("/applications", auth, requirePermission("applications:view"), async (re
 });
 app.get("/applications/:id", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const applicationId=String(req.params.id);
+ const applicationId=String(String(req.params.id));
  const a=await db.application.findUnique({where:{id:applicationId}});
  if(!a) return res.status(404).send("Application not found");
  const applicant=await db.user.findUnique({where:{id:a.userId}});
@@ -201,7 +201,7 @@ app.get("/applications/:id", auth, requireOwner, async (req,res) => {
 });
 app.post("/applications/:id/status", auth, requirePermission("applications:review"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const applicationId=String(req.params.id);
+ const applicationId=String(String(req.params.id));
  const status=z.enum(["submitted","reviewing","accepted","declined"]).safeParse(req.body.status);
  if(!status.success) return res.status(400).send("Invalid status");
  await db.application.update({where:{id:applicationId},data:{status:status.data}});
@@ -241,7 +241,7 @@ app.post("/settings/roles", auth, requireOwner, async (req,res) => {
 });
 app.post("/settings/roles/:id/delete", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const mappingId=String(req.params.id);
+ const mappingId=String(String(req.params.id));
  const mapping=await db.roleMapping.findFirst({where:{id:mappingId,guildId}});
  if(mapping){await db.roleMapping.delete({where:{id:mapping.id}});await audit(user.id,"role_mapping.deleted",mapping.discordRoleId,{permission:mapping.permission});}
  res.redirect("/settings");
@@ -333,14 +333,14 @@ app.get("/bot", auth, requireOwner, async (req,res) => {
 });
 app.post("/bot/actions/:id/retry", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const id=String(req.params.id);
+ const id=String(String(req.params.id));
  const updated=await db.discordAction.updateMany({where:{id,status:"failed"},data:{status:"queued",result:null,processedAt:null}});
  if(updated.count) await audit(user.id,"discord.action.retried",id);
  res.redirect("/bot");
 });
 app.post("/bot/actions/:id/cancel", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const id=String(req.params.id);
+ const id=String(String(req.params.id));
  const updated=await db.discordAction.updateMany({where:{id,status:"queued"},data:{status:"canceled",result:"Canceled by platform owner.",processedAt:new Date()}});
  if(updated.count) await audit(user.id,"discord.action.canceled",id);
  res.redirect("/bot");
@@ -406,7 +406,7 @@ app.get("/api/owner/status", auth, requireOwner, async (_req,res) => {
 });
 app.post("/applications/:id/notes", auth, requireOwner, async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
- const applicationId=String(req.params.id);
+ const applicationId=String(String(req.params.id));
  const body=z.string().trim().min(1).max(2000).safeParse(req.body.body);
  if(!body.success) return res.status(400).send("Note must contain 1 to 2,000 characters.");
  const application=await db.application.findUnique({where:{id:applicationId}});
@@ -453,7 +453,7 @@ app.get("/giveaways",auth,async(req,res)=>{
  page(res,"Giveaways",html,u);
 });
 app.post("/giveaways/:id/enter",auth,async(req,res)=>{
- const u=(req as AuthedRequest).portalUser!,g=await db.giveaway.findUnique({where:{id:req.params.id}});
+ const u=(req as AuthedRequest).portalUser!,g=await db.giveaway.findUnique({where:{id:String(req.params.id)}});
  if(!g||g.status!=="open"||g.endsAt<new Date())return res.status(404).send("Giveaway closed.");
  await db.giveawayEntry.upsert({where:{giveawayId_userId:{giveawayId:g.id,userId:u.id}},create:{giveawayId:g.id,userId:u.id},update:{}});await audit(u.id,"giveaway.entered",g.id);res.redirect("/giveaways");
 });
@@ -466,7 +466,7 @@ app.get("/staff",auth,async(req,res)=>{
 });
 app.post("/staff/tasks/:id",auth,async(req,res)=>{
  const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!["staff:access","staff:tasks"].some(x=>p.has(x)))return res.status(403).send("Staff permission required.");
- const task=await db.staffTask.findUnique({where:{id:req.params.id}});if(!task||(task.assigneeId&&task.assigneeId!==u.id&&!p.has("executive:manage")&&!p.has("*")))return res.status(403).send("Task access denied.");
+ const task=await db.staffTask.findUnique({where:{id:String(req.params.id)}});if(!task||(task.assigneeId&&task.assigneeId!==u.id&&!p.has("executive:manage")&&!p.has("*")))return res.status(403).send("Task access denied.");
  const status=["open","in_progress","done"].includes(String(req.body.status))?String(req.body.status):"open";await db.staffTask.update({where:{id:task.id},data:{status}});await audit(u.id,"staff.task.updated",task.id,{status});res.redirect("/staff");
 });
 app.get("/staff/reports",auth,async(req,res)=>{
@@ -518,7 +518,7 @@ app.post("/executive/roles",auth,async(req,res)=>{
 });
 app.post("/executive/roles/:id/delete",auth,async(req,res)=>{
  const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("executive:manage"))return res.status(403).send("Executive permission required.");
- const mapping=await db.roleMapping.findUnique({where:{id:req.params.id}});if(mapping&&mapping.guildId===guildId)await db.roleMapping.delete({where:{id:mapping.id}});await audit(u.id,"executive.role_mapping.deleted",req.params.id);res.redirect("/executive");
+ const mapping=await db.roleMapping.findUnique({where:{id:String(req.params.id)}});if(mapping&&mapping.guildId===guildId)await db.roleMapping.delete({where:{id:mapping.id}});await audit(u.id,"executive.role_mapping.deleted",String(req.params.id));res.redirect("/executive");
 });
 
 app.use((req: Request, res: Response) => {
