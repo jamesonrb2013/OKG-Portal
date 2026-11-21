@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, GuildMember, ChannelType } from "discord.js";
+import { Client, GatewayIntentBits, Events, GuildMember, REST, Routes } from "discord.js";
 import { PrismaClient } from "@prisma/client";
 
 let activeClient: Client | null = null;
@@ -38,6 +38,6 @@ export async function startDiscordGateway(db: PrismaClient){
  client.on(Events.GuildMemberUpdate,async(_before,after)=>{try{await syncMember(db,after);}catch(error){console.error("Discord role update sync failed:",error);}});
  client.on(Events.GuildMemberAdd,async member=>{try{await syncMember(db,member);}catch(error){console.error("Discord join sync failed:",error);}});
  client.on(Events.GuildMemberRemove,async member=>{try{const user=await db.user.findUnique({where:{discordId:member.id}});if(user)await db.$transaction([db.memberRole.deleteMany({where:{userId:user.id,guildId:member.guild.id}}),db.user.update({where:{id:user.id},data:{isGuildMember:false}})]);}catch(error){console.error("Discord member removal sync failed:",error);}});
- client.once(Events.ClientReady,ready=>{startedAt=new Date();console.log("OKG Portal role-sync gateway connected as "+ready.user.tag+". No slash commands or Discord action worker are enabled.");});
+ client.once(Events.ClientReady,async ready=>{startedAt=new Date();console.log("OKG Portal role-sync gateway connected as "+ready.user.tag+". No slash commands or Discord action worker are enabled.");if(process.env.DISCORD_CLIENT_ID){try{const rest=new REST({version:"10"}).setToken(process.env.DISCORD_BOT_TOKEN!);await rest.put(Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID,guildId),{body:[]});console.log("Removed legacy OKG Portal slash commands; OKG Manager remains the bot administration system.");}catch(error){console.error("Could not clear legacy portal slash commands:",error);}}});
  try{await client.login(process.env.DISCORD_BOT_TOKEN);}catch(error){activeClient=null;try{client.destroy();}catch{}throw error;}
 }
