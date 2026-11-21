@@ -151,6 +151,7 @@ model CommunityEvent {
  visibility String @default("public")
  createdBy String
  createdAt DateTime @default(now())
+ invites EventInvite[]
  @@index([visibility, startsAt])
 }
 model Giveaway {
