@@ -49,22 +49,24 @@ app.use(session({
   cookie: { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 1000 * 60 * 60 * 24 * 7 }
 }));
 app.use("/assets", express.static("public", { maxAge: "1h" }));
+app.use((req,res,next)=>{
+ const blocked=["/bot","/server","/moderation","/control","/members","/settings","/audit","/api/owner"];
+ if(blocked.some(path=>req.path===path||req.path.startsWith(path+"/"))) return res.status(404).send("This administration function is handled separately by OKG Manager.");
+ next();
+});
+
 
 function shell(title: string, content: string, user?: any) {
-  const nav = user ? `<nav><a href="/dashboard">Overview</a><a href="/members">Members</a><a href="/server">Server</a><a href="/moderation">Moderation</a><a href="/bot">Bot</a><a href="/control">Control Center</a><a href="/applications">Applications</a><a href="/settings">Settings</a><a href="/audit">Audit</a><a href="/logout">Sign out</a></nav>` : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b14"><title>${title} · OKG Portal</title><link rel="stylesheet" href="/assets/style.css"></head><body><div class="ambient"></div><header class="topbar"><a class="brand" href="/"><span class="brand-mark">O</span><span>ONE KID GAMING<small>OFFICIAL PORTAL</small></span></a>${nav}<div class="top-right">${user ? `<span class="user-chip">${escapeHtml(user.displayName || user.username)}</span>` : '<a class="button button-quiet" href="/auth/discord">Sign in</a>'}</div></header><main>${content}</main><footer>ONE KID GAMING <span>·</span> Official community platform</footer></body></html>`;
+ const nav=user?'<nav><a href="/dashboard">Home</a><a href="/leaderboard">Leaderboard</a><a href="/games">Games</a><a href="/events">Events</a><a href="/giveaways">Giveaways</a><a href="/apply">Applications</a><a href="/profile">Profile</a><a href="/staff">Staff</a><a href="/executive">Leadership</a><a href="/logout">Sign out</a></nav>':"";
+ return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b14"><title>${escapeHtml(title)} · OKG Portal</title><link rel="stylesheet" href="/assets/style.css"></head><body><div class="ambient"></div><header class="topbar"><a class="brand" href="/"><span class="brand-mark">O</span><span>ONE KID GAMING<small>COMMUNITY PORTAL</small></span></a>${nav}<div class="top-right">${user ? `<span class="user-chip">${escapeHtml(user.displayName || user.username)}</span>` : '<a class="button button-quiet" href="/auth/discord">Sign in</a>'}</div></header><main>${content}</main><footer>ONE KID GAMING <span>·</span> Official community platform</footer></body></html>`;
 }
 function escapeHtml(value: unknown): string { return String(value ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]!)); }
 function page(res: Response, title: string, content: string, user?: any) { res.type("html").send(shell(title, content, user)); }
 async function auth(req: Request, res: Response, next: NextFunction) {
-  const sessionUser = req.session.userId ? await db.user.findUnique({ where: { id: req.session.userId } }) : null;
-  const user = sessionUser?.discordId === process.env.OWNER_DISCORD_USER_ID ? sessionUser : null;
-  if (!user || !user.isGuildMember || user.discordId !== process.env.OWNER_DISCORD_USER_ID) {
-    if (req.session.userId) req.session.destroy(() => {});
-    return page(res, "Portal access restricted", '<section class="panel narrow"><span class="eyebrow">PRIVATE OWNER ACCESS</span><h1>OKG Portal is currently private.</h1><p>Only the platform owner can use an account right now. Any previous non-owner sessions have been signed out.</p><a class="button" href="/">Return home</a></section>');
-  }
-  (req as AuthedRequest).portalUser = user;
-  next();
+ const user=req.session.userId?await db.user.findUnique({where:{id:req.session.userId}}):null;
+ if(!user||!user.isGuildMember){if(req.session.userId)req.session.destroy(()=>{});return page(res,"Sign in required",'<section class="panel narrow"><span class="eyebrow">MEMBER ACCESS</span><h1>Sign in to your OKG account.</h1><p>Use Discord to verify membership in the official OKG server.</p><a class="button" href="/auth/discord">Continue with Discord</a></section>');}
+ (req as AuthedRequest).portalUser=user;
+ next();
 }
 function requirePermission(permission: string) {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -97,7 +99,7 @@ app.get("/health", async (_req, res) => {
 });
 app.get("/", async (req, res) => {
   const sessionUser = req.session.userId ? await db.user.findUnique({ where: { id: req.session.userId } }) : null;
-  const user = sessionUser?.discordId === process.env.OWNER_DISCORD_USER_ID ? sessionUser : null;
+  const user = sessionUser?.isGuildMember ? sessionUser : null;
   const bannerSetting = await db.portalSetting.findUnique({ where: { key: "site_banner" } });
   const banner = (bannerSetting?.value || {}) as { enabled?: boolean; message?: string };
   const bannerHtml = banner.enabled && banner.message ? '<div class="panel narrow"><span class="eyebrow">OFFICIAL OKG UPDATE</span><p>'+escapeHtml(banner.message)+'</p></div>' : '';
@@ -123,11 +125,6 @@ app.get("/auth/discord/callback", async (req, res) => {
     const profileResponse = await fetch("https://discord.com/api/users/@me", { headers: { Authorization: "Bearer " + token.access_token } });
     if (!profileResponse.ok) throw new Error("Could not retrieve Discord profile");
     const profile = await profileResponse.json() as { id: string; username: string; global_name?: string; avatar?: string };
-    // Temporary closed beta: only the configured platform owner may create or use a portal account.
-    // This check runs before membership lookup or any database account write.
-    if (!process.env.OWNER_DISCORD_USER_ID || profile.id !== process.env.OWNER_DISCORD_USER_ID) {
-      return page(res, "Portal access restricted", '<section class="panel narrow"><span class="eyebrow">PRIVATE OWNER ACCESS</span><h1>OKG Portal is currently private.</h1><p>Account registration and sign-in are temporarily restricted to the platform owner. Please check back when access opens.</p><a class="button" href="/">Return home</a></section>');
-    }
     const memberResponse = await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${profile.id}`, { headers: { Authorization: "Bot " + process.env.DISCORD_BOT_TOKEN } });
     if (!memberResponse.ok) return page(res, "Server membership required", '<section class="panel narrow"><span class="eyebrow">MEMBERSHIP CHECK</span><h1>Join the official OKG Discord first.</h1><p>We could not verify your membership in the official server. Join OKG, then sign in again.</p><a class="button" href="https://discord.gg/nePR9dnuYm">Join OKG Discord</a></section>');
     const member = await memberResponse.json() as { roles: string[] };
@@ -150,21 +147,19 @@ app.get("/auth/discord/callback", async (req, res) => {
   }
 });
 app.get("/logout", (req, res) => req.session.destroy(() => res.redirect("/")));
-app.get("/dashboard", auth, requireOwner, async (req, res) => {
-  const user = (req as AuthedRequest).portalUser!;
-  const [members,applications,openCases,queued,failed,recentApps] = await Promise.all([
-    db.user.count({where:{isGuildMember:true}}), db.application.count(),
-    db.moderationCase.count({where:{guildId,active:true}}),
-    db.discordAction.count({where:{status:"queued"}}), db.discordAction.count({where:{status:"failed"}}),
-    db.application.findMany({where:{userId:user.id},orderBy:{submittedAt:"desc"},take:5})
-  ]);
-  const cards=recentApps.map(a=>'<div class="list-row"><span><b>'+escapeHtml(a.type)+' application</b><small>Submitted '+a.submittedAt.toLocaleDateString()+'</small></span><span class="status">'+escapeHtml(a.status)+'</span></div>').join("")||'<p class="muted">No applications have been submitted from this account.</p>';
-  const bot=getDiscordStatus();
-  const html='<section class="page-heading"><span class="eyebrow">PLATFORM OWNER · COMMAND CENTER</span><h1>Welcome back, '+escapeHtml(user.displayName||user.username)+'.</h1><p>Your central overview of One Kid Gaming operations, community systems and administration.</p></section>'+
-  '<section class="stat-grid"><article class="stat"><small>VERIFIED MEMBERS</small><strong>'+members+'</strong><span>Portal-linked Discord members</span></article><article class="stat"><small>APPLICATIONS</small><strong>'+applications+'</strong><span>All submitted applications</span></article><article class="stat"><small>ACTIVE CASES</small><strong>'+openCases+'</strong><span>Moderation records marked active</span></article></section>'+
-  '<section class="stat-grid"><article class="stat"><small>DISCORD BOT</small><strong>'+(bot.online?'Online':'Offline')+'</strong><span>'+(bot.ping===null?'No heartbeat':bot.ping+' ms latency')+'</span></article><article class="stat"><small>QUEUED ACTIONS</small><strong>'+queued+'</strong><span>Waiting for Discord worker</span></article><article class="stat"><small>FAILED ACTIONS</small><strong>'+failed+'</strong><span>Review in Bot Operations</span></article></section>'+
-  '<section class="content-grid"><article class="panel"><div class="panel-head"><div><span class="eyebrow">APPLICATIONS</span><h2>Recent submissions</h2></div><a href="/applications">Open queue ↗</a></div>'+cards+'</article><article class="panel"><span class="eyebrow">QUICK ACCESS</span><h2>Platform modules</h2><div class="list-row"><a href="/server">Server management →</a></div><div class="list-row"><a href="/members">Member directory →</a></div><div class="list-row"><a href="/moderation">Moderation center →</a></div><div class="list-row"><a href="/bot">Bot operations →</a></div><div class="list-row"><a href="/control">Discord Control Center →</a></div><div class="list-row"><a href="/settings">Platform settings →</a></div><div class="list-row"><a href="/audit">Security audit log →</a></div></article></section>';
-  page(res,"Owner dashboard",html,user);
+app.get("/dashboard", auth, async (req,res) => {
+ const user=(req as AuthedRequest).portalUser!;
+ const [events,giveaways,news,top]=await Promise.all([
+  db.communityEvent.findMany({where:{visibility:"public",startsAt:{gte:new Date(Date.now()-86400000)}},orderBy:{startsAt:"asc"},take:4}),
+  db.giveaway.findMany({where:{status:"open",endsAt:{gt:new Date()}},orderBy:{endsAt:"asc"},take:4}),
+  db.portalAnnouncement.findMany({where:{audience:{in:["members","everyone"]}},orderBy:[{pinned:"desc"},{createdAt:"desc"}],take:4}),
+  db.user.findMany({where:{isGuildMember:true},orderBy:{xp:"desc"},take:5})
+ ]);
+ const list=(items:any[],fn:(x:any)=>string)=>items.map(fn).join("")||'<p class="muted">Nothing to show right now.</p>';
+ const html='<section class="page-heading"><span class="eyebrow">MEMBER DASHBOARD</span><h1>Welcome back, '+escapeHtml(user.displayName||user.username)+'.</h1><p>Your OKG community hub. Play, compete and stay connected.</p></section>'+
+ '<section class="stat-grid"><article class="stat"><small>YOUR LEVEL</small><strong>'+user.level+'</strong><span>'+user.xp+' XP</span></article><article class="stat"><small>MEMBER SINCE</small><strong>'+user.createdAt.toLocaleDateString()+'</strong><span>OFFICIAL MEMBER</span></article><article class="stat"><small>YOUR ACCESS</small><strong>'+(user.isOwner?'Platform Owner':'Member')+'</strong><span>SYNCED FROM DISCORD</span></article></section>'+
+ '<section class="content-grid"><div><section class="panel"><h2>Community announcements</h2>'+list(news,x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+escapeHtml(x.body)+'</small></span></div>')+'</section><br><section class="panel"><h2>Upcoming events</h2>'+list(events,x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+x.startsAt.toLocaleString()+'</small></span></div>')+'</section></div><div><section class="panel"><h2>Active giveaways</h2>'+list(giveaways,x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+escapeHtml(x.prize)+' · Ends '+x.endsAt.toLocaleString()+'</small></span><a href="/giveaways">View</a></div>')+'</section><br><section class="panel"><h2>Top members</h2>'+list(top,(x,i)=>'<div class="list-row"><span><b>'+escapeHtml(x.displayName||x.username)+'</b><small>Level '+x.level+'</small></span><span class="status">'+x.xp+' XP</span></div>')+'</section></div></section>';
+ page(res,"Member Home",html,user);
 });
 app.get("/apply", auth, (req, res) => {
  const user=(req as AuthedRequest).portalUser!;
@@ -416,6 +411,103 @@ app.post("/applications/:id/notes", auth, requireOwner, async (req,res) => {
 });
 
 // Unknown routes receive a branded 404 page instead of Express's default "Cannot GET" response.
+
+// Community features: no Discord command execution or server administration is exposed here.
+app.get("/profile",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!;
+ const achievements=await db.memberAchievement.findMany({where:{userId:u.id},orderBy:{awardedAt:"desc"}});
+ const html='<section class="page-heading"><span class="eyebrow">MEMBER PROFILE</span><h1>Your OKG identity.</h1><p>Manage your public profile and track your progress.</p></section><section class="content-grid"><section class="panel"><h2>'+escapeHtml(u.displayName||u.username)+'</h2><p>'+escapeHtml(u.bio||"Add a short introduction.")+'</p><p><b>'+u.xp+' XP</b> · Level '+u.level+'</p><form method="post" action="/profile"><label>Display name<input name="displayName" maxlength="40" value="'+escapeHtml(u.displayName||u.username)+'"></label><label>About you<textarea name="bio" maxlength="240">'+escapeHtml(u.bio||"")+'</textarea></label><button class="button">Save profile</button></form></section><section class="panel"><h2>Achievements</h2>'+achievements.map(a=>'<div class="list-row"><span><b>'+escapeHtml(a.title)+'</b><small>'+escapeHtml(a.description)+'</small></span></div>').join("")+'</section></section>';
+ page(res,"Your Profile",html,u);
+});
+app.post("/profile",auth,async(req,res)=>{const u=(req as AuthedRequest).portalUser!;await db.user.update({where:{id:u.id},data:{displayName:String(req.body.displayName||"").slice(0,40),bio:String(req.body.bio||"").slice(0,240)}});await audit(u.id,"profile.updated");res.redirect("/profile");});
+app.get("/leaderboard",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!;
+ const users=await db.user.findMany({where:{isGuildMember:true},orderBy:{xp:"desc"},take:50});
+ const scores=await db.gameScore.findMany({orderBy:{score:"desc"},take:20,include:{user:true}});
+ const html='<section class="page-heading"><span class="eyebrow">COMMUNITY RANKINGS</span><h1>Leaderboards.</h1><p>Earn XP and climb the rankings.</p></section><section class="content-grid"><section class="panel"><h2>Member XP</h2>'+users.map((x,i)=>'<div class="list-row"><span><b>#'+(i+1)+' '+escapeHtml(x.displayName||x.username)+'</b><small>Level '+x.level+'</small></span><span class="status">'+x.xp+' XP</span></div>').join("")+'</section><section class="panel"><h2>Game high scores</h2>'+scores.map((x,i)=>'<div class="list-row"><span><b>#'+(i+1)+' '+escapeHtml(x.user.displayName||x.user.username)+'</b><small>'+escapeHtml(x.game)+'</small></span><span class="status">'+x.score+'</span></div>').join("")+'</section></section>';
+ page(res,"Leaderboards",html,u);
+});
+app.get("/games",auth,(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,a=Math.floor(Math.random()*20)+1,b=Math.floor(Math.random()*20)+1;
+ (req.session as any).mathAnswer=a+b;
+ page(res,"Games",'<section class="page-heading"><span class="eyebrow">COMMUNITY ARCADE</span><h1>Quick Math Challenge.</h1><p>Get the answer right to earn 25 XP.</p></section><section class="panel narrow"><h2>'+a+' + '+b+' = ?</h2><form method="post" action="/games/answer"><label>Your answer<input name="answer" type="number" required></label><button class="button">Submit score</button></form></section>',u);
+});
+app.post("/games/answer",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,answer=Number(req.body.answer),expected=(req.session as any).mathAnswer;delete (req.session as any).mathAnswer;
+ if(!Number.isInteger(answer)||answer!==expected)return page(res,"Game result",'<section class="panel narrow"><h1>Not quite!</h1><p>Try another challenge.</p><a class="button" href="/games">Play again</a></section>',u);
+ await db.$transaction([db.gameScore.create({data:{userId:u.id,game:"quick-math",score:25}}),db.user.update({where:{id:u.id},data:{xp:{increment:25}}})]);await audit(u.id,"game.quick_math.completed");res.redirect("/leaderboard");
+});
+app.get("/events",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,events=await db.communityEvent.findMany({where:{OR:[{visibility:"public"},{visibility:"secret",createdBy:u.discordId}]},orderBy:{startsAt:"asc"}});
+ page(res,"Events",'<section class="page-heading"><span class="eyebrow">COMMUNITY CALENDAR</span><h1>OKG events.</h1><p>Public activities and special experiences.</p></section><section class="panel table-panel">'+(events.map(x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+x.startsAt.toLocaleString()+' · '+escapeHtml(x.description)+'</small></span><span class="status">'+escapeHtml(x.visibility)+'</span></div>').join("")||'<p>No events are published for your account.</p>')+'</section>',u);
+});
+app.get("/giveaways",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,items=await db.giveaway.findMany({where:{status:"open",endsAt:{gt:new Date()}},include:{_count:{select:{entries:true}},entries:{where:{userId:u.id}}}});
+ const html='<section class="page-heading"><span class="eyebrow">COMMUNITY PRIZES</span><h1>Giveaways.</h1><p>Enter current giveaways and follow the results.</p></section><section class="feature-grid">'+(items.map(g=>'<article class="feature"><h3>'+escapeHtml(g.title)+'</h3><p>'+escapeHtml(g.description)+'</p><p><b>Prize:</b> '+escapeHtml(g.prize)+'</p><p>'+g._count.entries+' entries · Ends '+g.endsAt.toLocaleString()+'</p>'+(g.entries.length?'<span class="status">YOU ENTERED</span>':'<form method="post" action="/giveaways/'+g.id+'/enter"><button class="button">Enter giveaway</button></form>')+'</article>').join("")||'<article class="feature"><h3>No active giveaways</h3><p>Check back soon.</p></article>')+'</section>';
+ page(res,"Giveaways",html,u);
+});
+app.post("/giveaways/:id/enter",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,g=await db.giveaway.findUnique({where:{id:req.params.id}});
+ if(!g||g.status!=="open"||g.endsAt<new Date())return res.status(404).send("Giveaway closed.");
+ await db.giveawayEntry.upsert({where:{giveawayId_userId:{giveawayId:g.id,userId:u.id}},create:{giveawayId:g.id,userId:u.id},update:{}});await audit(u.id,"giveaway.entered",g.id);res.redirect("/giveaways");
+});
+app.get("/staff",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);
+ if(!p.has("*")&&!["staff:access","staff:tasks","staff:reports","applications:review"].some(x=>p.has(x)))return page(res,"Staff access required",'<section class="panel narrow"><h1>Staff workspace.</h1><p>This area is only available to authorized OKG staff.</p><a class="button" href="/dashboard">Back to member portal</a></section>',u);
+ const tasks=await db.staffTask.findMany({where:{OR:[{assigneeId:u.id},{assigneeId:null}]},orderBy:{createdAt:"desc"},take:10});
+ const apps=await db.application.count({where:{status:"submitted"}});
+ page(res,"Staff Workspace",'<section class="page-heading"><span class="eyebrow">PRIVATE STAFF WORKSPACE</span><h1>Staff command center.</h1><p>Assignments, applications and team handovers.</p></section><section class="stat-grid"><article class="stat"><small>OPEN TASKS</small><strong>'+tasks.length+'</strong></article><article class="stat"><small>APPLICATIONS WAITING</small><strong>'+apps+'</strong></article><article class="stat"><small>YOUR ACCESS</small><strong>Verified</strong></article></section><section class="content-grid"><section class="panel"><h2>Your tasks</h2>'+tasks.map(t=>'<div class="list-row"><span><b>'+escapeHtml(t.title)+'</b><small>'+escapeHtml(t.description)+' · '+escapeHtml(t.priority)+'</small></span><form method="post" action="/staff/tasks/'+t.id+'"><select name="status"><option value="open">Open</option><option value="in_progress">In progress</option><option value="done">Done</option></select><button class="button button-quiet">Update</button></form></div>').join("")+'</section><section class="panel"><h2>Staff tools</h2><div class="list-row"><a href="/applications">Review applications</a></div><div class="list-row"><a href="/staff/reports">Reports and handovers</a></div></section></section>',u);
+});
+app.post("/staff/tasks/:id",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!["staff:access","staff:tasks"].some(x=>p.has(x)))return res.status(403).send("Staff permission required.");
+ const task=await db.staffTask.findUnique({where:{id:req.params.id}});if(!task||(task.assigneeId&&task.assigneeId!==u.id&&!p.has("executive:manage")&&!p.has("*")))return res.status(403).send("Task access denied.");
+ const status=["open","in_progress","done"].includes(String(req.body.status))?String(req.body.status):"open";await db.staffTask.update({where:{id:task.id},data:{status}});await audit(u.id,"staff.task.updated",task.id,{status});res.redirect("/staff");
+});
+app.get("/staff/reports",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("staff:reports"))return res.status(403).send("Staff report permission required.");
+ const reports=await db.staffReport.findMany({include:{author:true},orderBy:{createdAt:"desc"},take:50});
+ page(res,"Staff Reports",'<section class="page-heading"><span class="eyebrow">STAFF WORKSPACE</span><h1>Reports and handovers.</h1><p>Private staff records for follow-ups and coordination.</p></section><form class="form-panel panel" method="post" action="/staff/reports"><label>Title<input name="title" required maxlength="120"></label><label>Category<input name="category" maxlength="40" value="general"></label><label>Details<textarea name="body" required maxlength="5000"></textarea></label><button class="button">Submit report</button></form><section class="panel table-panel">'+reports.map(x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+escapeHtml(x.category)+' · '+escapeHtml(x.author.displayName||x.author.username)+' · '+x.createdAt.toLocaleString()+'</small></span><span class="status">'+escapeHtml(x.status)+'</span></div>').join("")+'</section>',u);
+});
+app.post("/staff/reports",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("staff:reports"))return res.status(403).send("Staff report permission required.");
+ await db.staffReport.create({data:{title:String(req.body.title||"").slice(0,120),category:String(req.body.category||"general").slice(0,40),body:String(req.body.body||"").slice(0,5000),authorId:u.id}});await audit(u.id,"staff.report.created");res.redirect("/staff/reports");
+});
+app.get("/executive",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("executive:access")&&!p.has("executive:manage"))return page(res,"Leadership access required",'<section class="panel narrow"><h1>Executive workspace.</h1><p>This private area is restricted to OKG leadership.</p><a class="button" href="/dashboard">Back</a></section>',u);
+ const [members,apps,roles]=await Promise.all([db.user.count({where:{isGuildMember:true}}),db.application.count({where:{status:"submitted"}}),db.roleMapping.findMany({where:{guildId},orderBy:{permission:"asc"}})]);
+ const permissions=["staff:access","staff:tasks","staff:reports","applications:view","applications:review","events:manage","giveaways:manage","announcements:manage","executive:access","executive:manage","members:view","audit:view"];
+ const mappings=roles.map(x=>'<div class="list-row"><span><b>'+escapeHtml(x.discordRoleId)+'</b><small>'+escapeHtml(x.permission)+'</small></span><form method="post" action="/executive/roles/'+x.id+'/delete"><button class="text-button">Remove</button></form></div>').join("");
+ const html='<section class="page-heading"><span class="eyebrow">RESTRICTED LEADERSHIP</span><h1>Executive overview.</h1><p>Manage staff access and the community experience.</p></section><section class="stat-grid"><article class="stat"><small>MEMBERS</small><strong>'+members+'</strong></article><article class="stat"><small>APPLICATIONS WAITING</small><strong>'+apps+'</strong></article><article class="stat"><small>ROLE MAPPINGS</small><strong>'+roles.length+'</strong></article></section><section class="content-grid"><div><section class="panel"><h2>Create staff task</h2><form method="post" action="/executive/tasks"><label>Task title<input name="title" required></label><label>Description<textarea name="description"></textarea></label><label>Assignee Discord ID (optional)<input name="discordId"></label><label>Priority<select name="priority"><option>normal</option><option>high</option><option>urgent</option></select></label><button class="button">Create task</button></form></section><br><section class="panel"><h2>Publish announcement</h2><form method="post" action="/executive/announcements"><label>Title<input name="title" required></label><label>Message<textarea name="body" required></textarea></label><label>Audience<select name="audience"><option>members</option><option>everyone</option><option>staff</option></select></label><button class="button">Publish</button></form></section><br><section class="panel"><h2>Create event</h2><form method="post" action="/executive/events"><label>Title<input name="title" required></label><label>Description<textarea name="description"></textarea></label><label>Start<input type="datetime-local" name="startsAt" required></label><label>Visibility<select name="visibility"><option>public</option><option>secret</option></select></label><button class="button">Create event</button></form></section></div><div><section class="panel"><h2>Discord role permissions</h2><p>These permissions are enforced server-side against synced Discord roles.</p><form method="post" action="/executive/roles"><label>Role ID<input name="discordRoleId" required pattern="[0-9]{15,22}"></label><label>Permission<select name="permission">'+permissions.map(x=>'<option>'+x+'</option>').join("")+'</select></label><button class="button">Add mapping</button></form>'+mappings+'</section><br><section class="panel"><h2>Create giveaway</h2><form method="post" action="/executive/giveaways"><label>Title<input name="title" required></label><label>Prize<input name="prize" required></label><label>Description<textarea name="description"></textarea></label><label>Ends at<input type="datetime-local" name="endsAt" required></label><button class="button">Publish giveaway</button></form></section><br><section class="panel"><h2>Separation of duties</h2><p>Bot commands, moderation, channel operations and Discord control tools are not available in this portal.</p></section></div></section>';
+ page(res,"Executive Portal",html,u);
+});
+app.post("/executive/tasks",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("executive:manage"))return res.status(403).send("Executive permission required.");
+ const discordId=String(req.body.discordId||"").trim(),assignee=discordId?await db.user.findUnique({where:{discordId}}):null;if(discordId&&!assignee)return res.status(400).send("The assignee must sign into the portal first.");
+ await db.staffTask.create({data:{title:String(req.body.title||"").slice(0,120),description:String(req.body.description||"").slice(0,1500),priority:["normal","high","urgent"].includes(String(req.body.priority))?String(req.body.priority):"normal",assigneeId:assignee?.id||null,creatorId:u.id}});await audit(u.id,"executive.task.created");res.redirect("/executive");
+});
+app.post("/executive/announcements",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("announcements:manage"))return res.status(403).send("Announcement permission required.");
+ await db.portalAnnouncement.create({data:{title:String(req.body.title||"").slice(0,120),body:String(req.body.body||"").slice(0,2500),audience:["members","everyone","staff"].includes(String(req.body.audience))?String(req.body.audience):"members",authorId:u.discordId}});await audit(u.id,"executive.announcement.created");res.redirect("/executive");
+});
+app.post("/executive/events",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("events:manage"))return res.status(403).send("Event permission required.");const startsAt=new Date(String(req.body.startsAt));if(Number.isNaN(startsAt.getTime()))return res.status(400).send("Invalid event date.");
+ await db.communityEvent.create({data:{title:String(req.body.title||"").slice(0,120),description:String(req.body.description||"").slice(0,2000),startsAt,visibility:req.body.visibility==="secret"?"secret":"public",createdBy:u.discordId}});await audit(u.id,"executive.event.created");res.redirect("/executive");
+});
+app.post("/executive/giveaways",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("giveaways:manage"))return res.status(403).send("Giveaway permission required.");const endsAt=new Date(String(req.body.endsAt));if(Number.isNaN(endsAt.getTime())||endsAt<=new Date())return res.status(400).send("End date must be in the future.");
+ await db.giveaway.create({data:{title:String(req.body.title||"").slice(0,120),prize:String(req.body.prize||"").slice(0,160),description:String(req.body.description||"").slice(0,1000),endsAt,createdBy:u.discordId}});await audit(u.id,"executive.giveaway.created");res.redirect("/executive");
+});
+app.post("/executive/roles",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("executive:manage"))return res.status(403).send("Executive permission required.");
+ const role=String(req.body.discordRoleId||""),permission=String(req.body.permission||""),allowed=["staff:access","staff:tasks","staff:reports","applications:view","applications:review","events:manage","giveaways:manage","announcements:manage","executive:access","executive:manage","members:view","audit:view"];
+ if(!/^\d{15,22}$/.test(role)||!allowed.includes(permission))return res.status(400).send("Invalid role mapping.");
+ await db.roleMapping.upsert({where:{guildId_discordRoleId_permission:{guildId,discordRoleId:role,permission}},create:{guildId,discordRoleId:role,permission},update:{}});await audit(u.id,"executive.role_mapping.created",role,{permission});res.redirect("/executive");
+});
+app.post("/executive/roles/:id/delete",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);if(!p.has("*")&&!p.has("executive:manage"))return res.status(403).send("Executive permission required.");
+ const mapping=await db.roleMapping.findUnique({where:{id:req.params.id}});if(mapping&&mapping.guildId===guildId)await db.roleMapping.delete({where:{id:mapping.id}});await audit(u.id,"executive.role_mapping.deleted",req.params.id);res.redirect("/executive");
+});
+
 app.use((req: Request, res: Response) => {
   console.info("OKG Portal route not found:", req.method, req.path);
   res.status(404);
