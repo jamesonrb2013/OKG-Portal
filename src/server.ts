@@ -50,6 +50,12 @@ app.use(session({
 }));
 app.use("/assets", express.static("public", { maxAge: "1h" }));
 app.use((req,res,next)=>{
+ const denied=["/bot","/server","/moderation","/control","/members","/settings","/audit","/api/owner"];
+ if(denied.some(path=>req.path===path||req.path.startsWith(path+"/"))) return res.status(404).send("Discord administration is handled separately by OKG Manager.");
+ next();
+});
+
+app.use((req,res,next)=>{
  const blocked=["/bot","/server","/moderation","/control","/members","/settings","/audit","/api/owner"];
  if(blocked.some(path=>req.path===path||req.path.startsWith(path+"/"))) return res.status(404).send("This administration function is handled separately by OKG Manager.");
  next();
