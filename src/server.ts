@@ -462,12 +462,21 @@ app.get("/events",auth,async(req,res)=>{
 app.get("/giveaways",auth,async(req,res)=>{
  const u=(req as AuthedRequest).portalUser!,items=await db.giveaway.findMany({where:{status:"open",endsAt:{gt:new Date()}},include:{_count:{select:{entries:true}},entries:{where:{userId:u.id}}}});
  const html='<section class="page-heading"><span class="eyebrow">COMMUNITY PRIZES</span><h1>Giveaways.</h1><p>Enter current giveaways and follow the results.</p></section><section class="feature-grid">'+(items.map(g=>'<article class="feature"><h3>'+escapeHtml(g.title)+'</h3><p>'+escapeHtml(g.description)+'</p><p><b>Prize:</b> '+escapeHtml(g.prize)+'</p><p>'+g._count.entries+' entries · Ends '+g.endsAt.toLocaleString()+'</p>'+(g.entries.length?'<span class="status">YOU ENTERED</span>':'<form method="post" action="/giveaways/'+g.id+'/enter"><button class="button">Enter giveaway</button></form>')+'</article>').join("")||'<article class="feature"><h3>No active giveaways</h3><p>Check back soon.</p></article>')+'</section>';
- page(res,"Giveaways",html,u);
+ page(res,"Giveaways",html+'<section class="panel narrow"><a href="/giveaways/winners">View previous giveaway winners ↗</a></section>',u);
 });
 app.post("/giveaways/:id/enter",auth,async(req,res)=>{
  const u=(req as AuthedRequest).portalUser!,g=await db.giveaway.findUnique({where:{id:String(req.params.id)}});
  if(!g||g.status!=="open"||g.endsAt<new Date())return res.status(404).send("Giveaway closed.");
  await db.giveawayEntry.upsert({where:{giveawayId_userId:{giveawayId:g.id,userId:u.id}},create:{giveawayId:g.id,userId:u.id},update:{}});await audit(u.id,"giveaway.entered",g.id);res.redirect("/giveaways");
+});
+app.get("/giveaways/winners",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!;
+ const completed=await db.giveaway.findMany({where:{status:"completed"},orderBy:{createdAt:"desc"},take:25});
+ const ids=completed.map(g=>g.winnerId).filter((x):x is string=>Boolean(x));
+ const users=ids.length?await db.user.findMany({where:{discordId:{in:ids}}}):[];
+ const names=new Map(users.map(x=>[x.discordId,x.displayName||x.username]));
+ const html='<section class="page-heading"><span class="eyebrow">COMMUNITY HIGHLIGHTS</span><h1>Giveaway winners.</h1><p>Celebrating recent OKG community winners.</p></section><section class="panel table-panel">'+(completed.map(g=>'<div class="list-row"><span><b>'+escapeHtml(g.title)+'</b><small>'+escapeHtml(g.prize)+' · Drawn '+g.createdAt.toLocaleDateString()+'</small></span><span class="status">'+escapeHtml(names.get(g.winnerId||"")||"Winner announced")+'</span></div>').join("")||'<p>No winners have been announced yet.</p>')+'</section>';
+ page(res,"Giveaway Winners",html,u);
 });
 app.get("/staff",auth,async(req,res)=>{
  const u=(req as AuthedRequest).portalUser!,p=await getPermissions(db,u);
