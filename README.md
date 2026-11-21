@@ -1,102 +1,87 @@
 # OKG Portal
 
-The official One Kid Gaming owner and community administration portal.
+The official One Kid Gaming community platform for members, staff and leadership.
 
-## Current platform modules
+## Portal areas
 
-- **Owner dashboard:** live counts for linked members, applications, moderation cases, queued actions, failed actions and Discord bot state.
-- **Discord identity:** OAuth2 sign-in, official-server membership verification, owner-ID allowlist and server-side session checks.
-- **Member directory:** linked member search, Discord IDs, synced roles, account profile and moderation history.
-- **Server management:** live channel and role inventory, create text/voice channels, create roles, delete editable channels and roles.
-- **Moderation center:** warnings, timeouts, timeout clearing, kicks, bans and unbans with durable case history.
-- **Discord Control Center:** channel announcements, DMs, role assignment/removal, nicknames, moderation actions, message deletion and bulk cleanup.
-- **Bot operations:** Gateway state, heartbeat latency, slash-command registration, queue counts and recent job results.
-- **Applications:** staff/helper/partner submissions, review status and internal reviewer notes.
-- **Platform settings:** Discord role-to-permission mappings and an owner-managed homepage announcement banner.
-- **Audit trail:** login, role sync, portal changes and bot action outcomes.
-- **Owner API:** /api/owner/status, protected by the same owner session middleware.
+- **Member portal:** Discord-linked member profiles, XP and levels, member leaderboards, game scores, community games, giveaways, event listings and applications.
+- **Staff portal:** role-gated staff workspace, assigned tasks, application review and private staff reports / handovers.
+- **Executive portal:** role-permission mapping, staff task assignment, announcements, event publishing and giveaway publishing.
+- **Private events:** secret events are only shown to explicitly invited, verified OKG members.
+- **Audit trail:** sign-ins, profile changes, applications, staff records and management actions are logged.
 
-## Discord slash commands
+## Separation from OKG Manager
 
-The bot registers a guild-scoped /okg command group:
-- ping, server, member, sync
-- announce, dm
-- role-add, role-remove, role-create, role-delete
-- nickname
-- channel-create, channel-delete
-- message-delete, purge
-- warn, timeout, clear-timeout, kick, ban, unban
+The portal is not a Discord bot control panel. Portal routes for bot operations, moderation, channel management, server management, bot job queues, and the old control center are blocked. The portal's Discord integration is limited to verifying official-server membership and synchronizing Discord roles. Legacy slash commands registered by the portal bot are cleared at Gateway startup.
 
-Every interaction checks OWNER_DISCORD_USER_ID on the server. Being a Discord administrator or holding a mapped role does not bypass that owner-ID check.
+Use **OKG Manager** for bot and server administration. This portal is for the community experience and internal staff workflows.
+
+## Access model
+
+- Members sign in with Discord OAuth2 and must be verified in the official OKG Discord server.
+- Staff access is granted through role-to-permission mappings stored in PostgreSQL.
+- Executive access is separately permission-gated.
+- The platform owner is recognized by `OWNER_DISCORD_USER_ID` and receives platform-owner permissions.
+- Permissions are checked server-side on every protected route. Hiding navigation links is not used as a security boundary.
+
+Available role permissions:
+- `staff:access`, `staff:tasks`, `staff:reports`
+- `applications:view`, `applications:review`
+- `events:manage`, `giveaways:manage`, `announcements:manage`
+- `executive:access`, `executive:manage`
+- `members:view`, `audit:view`
+
+The owner can configure role mappings in the Executive Portal.
 
 ## Stack
 
-Node.js 20+, Express 5, TypeScript, Prisma, PostgreSQL, Discord.js 14.
+Node.js 20+, Express 5, TypeScript, Prisma 6, PostgreSQL, Discord.js 14.
 
 ## Environment variables
 
-- DATABASE_URL — Aiven PostgreSQL connection string.
-- SESSION_SECRET — long random value (at least 32 characters in production).
-- DISCORD_CLIENT_ID
-- DISCORD_CLIENT_SECRET
-- DISCORD_BOT_TOKEN
-- DISCORD_GUILD_ID
-- DISCORD_REDIRECT_URI — https://portal.onekidgaming.com/auth/discord/callback
-- OWNER_DISCORD_USER_ID — the one permitted portal identity.
-- APP_BASE_URL — https://portal.onekidgaming.com
-- NODE_ENV=production
+- `DATABASE_URL` — PostgreSQL connection string (Aiven is the configured provider).
+- `SESSION_SECRET` — random secret of at least 32 characters in production.
+- `DISCORD_CLIENT_ID`
+- `DISCORD_CLIENT_SECRET`
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_GUILD_ID`
+- `DISCORD_REDIRECT_URI` — `https://portal.onekidgaming.com/auth/discord/callback`
+- `OWNER_DISCORD_USER_ID` — platform owner's Discord user ID.
+- `APP_BASE_URL` — `https://portal.onekidgaming.com`
+- `NODE_ENV=production`
 
-Never commit .env files, OAuth secrets, bot tokens, or database credentials.
+Never commit secrets, tokens, or database credentials.
 
 ## Local setup
 
 1. Install Node.js 20 or newer.
-2. Run npm install.
-3. Copy .env.example to .env and fill in the values.
-4. Create a PostgreSQL database and set DATABASE_URL.
-5. Run npm run db:generate and npm run db:deploy.
-6. Run npm run dev.
+2. Run `npm install`.
+3. Copy `.env.example` to `.env` and fill in the values.
+4. Run `npm run build`.
+5. Run `npm start` (the start script applies the Prisma schema before starting the web service).
 
 ## Discord setup
 
-Create a Discord application and bot. Enable the **Server Members Intent** under Bot > Privileged Gateway Intents. Invite the bot to the official OKG server with:
-- View Channels
-- Read Message History
-- Send Messages
-- Manage Messages
-- Manage Roles
-- Manage Nicknames
-- Moderate Members
-- Kick Members
-- Ban Members
-- Manage Channels
+Create a dedicated Discord application and bot for portal identity verification and role synchronization. Enable **Server Members Intent** in the Developer Portal. Invite the bot to the official OKG server and keep it in the guild. It does not need Discord moderation, channel-management or message-management permissions for the portal's current features.
 
-Only grant the permissions the portal workflows need. The bot must be placed above roles it needs to manage. Its slash commands are registered automatically when the Gateway becomes ready.
-
-OAuth redirect URI: https://portal.onekidgaming.com/auth/discord/callback
+The bot must remain online for Gateway role synchronization. OAuth membership checks also require the bot token and official guild ID.
 
 ## Render
 
-The existing service is okg-portal in the Okg Portal account / My Workspace workspace.
-- Build: npm install && npm run build
-- Start: npm start
-- Start script: prisma db push && node dist/server.js
-- Health check: /health
-- Custom domain: portal.onekidgaming.com
+The existing service is **OKG-Portal** in the **Okg Portal / My Workspace** Render workspace.
+- Build: `npm install && npm run build`
+- Start: `npm start`
+- Health check: `/health`
+- Custom domain: `portal.onekidgaming.com`
+- One instance is sufficient for the in-process Discord Gateway role listener.
 
-The portal and bot Gateway/action worker run in the same Render web service. Keep the service to one instance while using its in-process action worker.
+If Render cannot clone this private GitHub repository, reconnect the GitHub integration and grant the Render installation access to `jamesonrb2013/OKG-Portal`.
 
-## Private beta security
+## Security notes
 
-- Only the exact Discord ID in OWNER_DISCORD_USER_ID can complete OAuth sign-in or use a session.
-- Existing non-owner sessions are destroyed on their next protected request.
-- Portal modules and the owner status API use server-side authentication; hiding a link is not treated as security.
-- Role mappings cannot grant platform-owner access.
-- Discord slash commands independently verify the same owner ID.
-- Destructive Discord actions are queued, executed by the bot, and recorded with success/failure results.
-- A worker restart marks old in-progress actions as failed for manual verification instead of blindly replaying potentially completed actions.
-- PostgreSQL session connections preserve Aiven's documented sslmode=require compatibility.
-
-## Operational limitations
-
-Discord permissions and role hierarchy still apply. Discord may reject actions against managed roles, higher-ranked members, locked channels, or messages older than 14 days for bulk deletion. DMs may fail when a recipient blocks DMs. These failures are reported in the bot job history rather than shown as successful actions.
+- Session cookies are HTTP-only, secure in production, and same-site.
+- State validation protects the Discord OAuth callback.
+- Cross-origin state-changing requests are rejected.
+- Discord roles are synchronized on join, leave, role update and sign-in.
+- Secret event visibility is enforced by explicit event-invite records, not by an unlisted URL.
+- Portal content and workflows do not execute Discord bot commands or moderation actions.
