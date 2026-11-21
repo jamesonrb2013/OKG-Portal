@@ -500,7 +500,7 @@ app.post("/executive/events",auth,async(req,res)=>{
  const visibility=req.body.visibility==="secret"?"secret":"public";
  const event=await db.communityEvent.create({data:{title:String(req.body.title||"").slice(0,120),description:String(req.body.description||"").slice(0,2000),startsAt,visibility,createdBy:u.discordId}});
  if(visibility==="secret"){
-  const ids=[...new Set(String(req.body.inviteDiscordIds||"").split(",").map((x:string)=>x.trim()).filter((x:string)=>/^\\d{15,22}$/.test(x)))];
+  const ids=[...new Set(String(req.body.inviteDiscordIds||"").split(",").map((x:string)=>x.trim()).filter((x:string)=>/^\d{15,22}$/.test(x)))];
   const invited=ids.length?await db.user.findMany({where:{discordId:{in:ids},isGuildMember:true},select:{id:true}}):[];
   if(invited.length)await db.eventInvite.createMany({data:invited.map(x=>({eventId:event.id,userId:x.id})),skipDuplicates:true});
  }
