@@ -492,7 +492,7 @@ app.post("/games/word/answer",auth,async(req,res)=>{
  await audit(u.id,"game.word_scramble.completed",undefined,{xpAwarded:25});res.redirect("/leaderboard");
 });
 app.get("/events",auth,async(req,res)=>{
- const u=(req as AuthedRequest).portalUser!,events=await db.communityEvent.findMany({where:{OR:[{visibility:"public"},{visibility:"secret",invites:{some:{userId:u.id}}}]},orderBy:{startsAt:"asc"}});
+ const u=(req as AuthedRequest).portalUser!,events=await db.communityEvent.findMany({where:{OR:[{visibility:"public"},{visibility:"secret",createdBy:u.discordId},{visibility:"secret",invites:{some:{userId:u.id}}}]},orderBy:{startsAt:"asc"}});
  page(res,"Events",'<section class="page-heading"><span class="eyebrow">COMMUNITY CALENDAR</span><h1>OKG events.</h1><p>Public activities and special experiences.</p></section><section class="panel table-panel">'+(events.map(x=>'<div class="list-row"><span><b>'+escapeHtml(x.title)+'</b><small>'+x.startsAt.toLocaleString()+' · '+escapeHtml(x.description)+'</small></span><span class="status">'+escapeHtml(x.visibility)+'</span></div>').join("")||'<p>No events are published for your account.</p>')+'</section>',u);
 });
 app.get("/giveaways",auth,async(req,res)=>{
