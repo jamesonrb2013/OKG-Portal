@@ -433,17 +433,22 @@ app.get("/leaderboard",auth,async(req,res)=>{
  const html='<section class="page-heading"><span class="eyebrow">COMMUNITY RANKINGS</span><h1>Leaderboards.</h1><p>Earn XP and climb the rankings.</p></section><section class="content-grid"><section class="panel"><h2>Member XP</h2>'+users.map((x,i)=>'<div class="list-row"><span><b>#'+(i+1)+' '+escapeHtml(x.displayName||x.username)+'</b><small>Level '+x.level+'</small></span><span class="status">'+x.xp+' XP</span></div>').join("")+'</section><section class="panel"><h2>Game high scores</h2>'+scores.map((x,i)=>'<div class="list-row"><span><b>#'+(i+1)+' '+escapeHtml(x.user.displayName||x.user.username)+'</b><small>'+escapeHtml(x.game)+'</small></span><span class="status">'+x.score+'</span></div>').join("")+'</section></section>';
  page(res,"Leaderboards",html,u);
 });
-app.get("/games",auth,async(req,res)=>{
+app.get("/games",auth,(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!;
+ const html='<section class="page-heading"><span class="eyebrow">COMMUNITY ARCADE</span><h1>Choose your game.</h1><p>Play daily challenges, earn XP and climb the community game leaderboard.</p></section><section class="feature-grid"><article class="feature"><span class="feature-icon">01</span><h3>Quick Math</h3><p>Race through a simple math challenge.</p><a class="button" href="/games/math">Play Quick Math</a></article><article class="feature"><span class="feature-icon">02</span><h3>OKG Trivia</h3><p>Test your community and gaming knowledge.</p><a class="button" href="/games/trivia">Play Trivia</a></article><article class="feature"><span class="feature-icon">03</span><h3>Word Scramble</h3><p>Unscramble a word before time runs out.</p><a class="button" href="/games/word">Play Word Scramble</a></article></section>';
+ page(res,"Community Games",html,u);
+});
+app.get("/games/math",auth,async(req,res)=>{
  const u=(req as AuthedRequest).portalUser!,since=new Date(Date.now()-86400000);
  const played=await db.gameScore.findFirst({where:{userId:u.id,game:"quick-math",createdAt:{gte:since}}});
  if(played)return page(res,"Games",'<section class="panel narrow"><span class="eyebrow">DAILY ARCADE</span><h1>Challenge completed.</h1><p>You have already earned your Quick Math XP in the last 24 hours. Come back tomorrow for another scored round.</p><a class="button" href="/leaderboard">View leaderboard</a></section>',u);
  const a=Math.floor(Math.random()*20)+1,b=Math.floor(Math.random()*20)+1;
  (req.session as any).mathAnswer=a+b;
- page(res,"Games",'<section class="page-heading"><span class="eyebrow">COMMUNITY ARCADE</span><h1>Quick Math Challenge.</h1><p>Get the answer right to earn 25 XP. One scored attempt every 24 hours.</p></section><section class="panel narrow"><h2>'+a+' + '+b+' = ?</h2><form method="post" action="/games/answer"><label>Your answer<input name="answer" type="number" required></label><button class="button">Submit score</button></form></section>',u);
+ page(res,"Games",'<section class="page-heading"><span class="eyebrow">COMMUNITY ARCADE</span><h1>Quick Math Challenge.</h1><p>Get the answer right to earn 25 XP. One scored attempt every 24 hours.</p></section><section class="panel narrow"><h2>'+a+' + '+b+' = ?</h2><form method="post" action="/games/math/answer"><label>Your answer<input name="answer" type="number" required></label><button class="button">Submit score</button></form></section>',u);
 });
-app.post("/games/answer",auth,async(req,res)=>{
+app.post("/games/math/answer",auth,async(req,res)=>{
  const u=(req as AuthedRequest).portalUser!,answer=Number(req.body.answer),expected=(req.session as any).mathAnswer;delete (req.session as any).mathAnswer;
- if(!Number.isInteger(answer)||expected===undefined||answer!==expected)return page(res,"Game result",'<section class="panel narrow"><h1>Not quite!</h1><p>That answer was not correct. You can try another round, but scored XP is limited to one win every 24 hours.</p><a class="button" href="/games">Back to games</a></section>',u);
+ if(!Number.isInteger(answer)||expected===undefined||answer!==expected)return page(res,"Game result",'<section class="panel narrow"><h1>Not quite!</h1><p>That answer was not correct. You can try another round, but scored XP is limited to one win every 24 hours.</p><a class="button" href="/games/math">Back to games</a></section>',u);
  const since=new Date(Date.now()-86400000),played=await db.gameScore.findFirst({where:{userId:u.id,game:"quick-math",createdAt:{gte:since}}});
  if(played)return page(res,"Game result",'<section class="panel narrow"><h1>Daily reward already claimed.</h1><p>You have already earned XP from this game in the last 24 hours.</p><a class="button" href="/leaderboard">View leaderboard</a></section>',u);
  const nextXp=u.xp+25;
@@ -454,6 +459,37 @@ app.post("/games/answer",auth,async(req,res)=>{
  ]);
  await audit(u.id,"game.quick_math.completed",undefined,{xpAwarded:25,newTotal:nextXp});
  res.redirect("/leaderboard");
+});
+app.get("/games/trivia",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,since=new Date(Date.now()-86400000);
+ const played=await db.gameScore.findFirst({where:{userId:u.id,game:"trivia",createdAt:{gte:since}}});
+ if(played)return page(res,"Trivia",'<section class="panel narrow"><h1>Daily trivia completed.</h1><p>Come back in 24 hours for another scored question.</p><a class="button" href="/games">Back to games</a></section>',u);
+ const questions=[{q:"Which Discord feature gives members a name color and server permissions?",a:"role"},{q:"What does XP usually mean in games?",a:"experience points"},{q:"What is the name for a competition with multiple rounds?",a:"tournament"}];
+ const item=questions[Math.floor(Math.random()*questions.length)];(req.session as any).triviaAnswer=item.a;
+ page(res,"OKG Trivia",'<section class="page-heading"><span class="eyebrow">DAILY TRIVIA</span><h1>Test your knowledge.</h1><p>A correct answer earns 25 XP. One reward every 24 hours.</p></section><section class="panel narrow"><h2>'+escapeHtml(item.q)+'</h2><form method="post" action="/games/trivia/answer"><label>Your answer<input name="answer" required maxlength="80"></label><button class="button">Submit answer</button></form></section>',u);
+});
+app.post("/games/trivia/answer",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,answer=String(req.body.answer||"").trim().toLowerCase(),expected=String((req.session as any).triviaAnswer||"");delete (req.session as any).triviaAnswer;
+ if(!expected||answer!==expected)return page(res,"Trivia result",'<section class="panel narrow"><h1>Not quite!</h1><p>That answer was not correct. Try again with a new question.</p><a class="button" href="/games/trivia">Play trivia</a></section>',u);
+ const since=new Date(Date.now()-86400000),played=await db.gameScore.findFirst({where:{userId:u.id,game:"trivia",createdAt:{gte:since}}});if(played)return res.redirect("/games");
+ const nextXp=u.xp+25;
+ await db.$transaction([db.gameScore.create({data:{userId:u.id,game:"trivia",score:25}}),db.user.update({where:{id:u.id},data:{xp:{increment:25},level:Math.floor(nextXp/100)+1}}),db.memberAchievement.upsert({where:{userId_key:{userId:u.id,key:"first-trivia"}},create:{userId:u.id,key:"first-trivia",title:"Trivia Starter",description:"Answered your first OKG trivia question correctly."},update:{}})]);
+ await audit(u.id,"game.trivia.completed",undefined,{xpAwarded:25});res.redirect("/leaderboard");
+});
+app.get("/games/word",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,since=new Date(Date.now()-86400000),played=await db.gameScore.findFirst({where:{userId:u.id,game:"word-scramble",createdAt:{gte:since}}});
+ if(played)return page(res,"Word Scramble",'<section class="panel narrow"><h1>Daily word challenge completed.</h1><p>Come back in 24 hours for another scored round.</p><a class="button" href="/games">Back to games</a></section>',u);
+ const words=["gaming","community","leaderboard","achievement","tournament"],word=words[Math.floor(Math.random()*words.length)],scrambled=word.split("").sort(()=>Math.random()-.5).join("");
+ (req.session as any).wordAnswer=word;
+ page(res,"Word Scramble",'<section class="page-heading"><span class="eyebrow">DAILY WORD CHALLENGE</span><h1>Unscramble this word.</h1><p>Correct answers earn 25 XP. One reward every 24 hours.</p></section><section class="panel narrow"><h2 style="letter-spacing:5px">'+escapeHtml(scrambled.toUpperCase())+'</h2><form method="post" action="/games/word/answer"><label>Your answer<input name="answer" required maxlength="30"></label><button class="button">Submit answer</button></form></section>',u);
+});
+app.post("/games/word/answer",auth,async(req,res)=>{
+ const u=(req as AuthedRequest).portalUser!,answer=String(req.body.answer||"").trim().toLowerCase(),expected=String((req.session as any).wordAnswer||"");delete (req.session as any).wordAnswer;
+ if(!expected||answer!==expected)return page(res,"Word Scramble result",'<section class="panel narrow"><h1>Not quite!</h1><p>That word did not match. Try another round.</p><a class="button" href="/games/word">Play Word Scramble</a></section>',u);
+ const since=new Date(Date.now()-86400000),played=await db.gameScore.findFirst({where:{userId:u.id,game:"word-scramble",createdAt:{gte:since}}});if(played)return res.redirect("/games");
+ const nextXp=u.xp+25;
+ await db.$transaction([db.gameScore.create({data:{userId:u.id,game:"word-scramble",score:25}}),db.user.update({where:{id:u.id},data:{xp:{increment:25},level:Math.floor(nextXp/100)+1}}),db.memberAchievement.upsert({where:{userId_key:{userId:u.id,key:"first-word"}},create:{userId:u.id,key:"first-word",title:"Word Wizard",description:"Solved your first OKG word scramble."},update:{}})]);
+ await audit(u.id,"game.word_scramble.completed",undefined,{xpAwarded:25});res.redirect("/leaderboard");
 });
 app.get("/events",auth,async(req,res)=>{
  const u=(req as AuthedRequest).portalUser!,events=await db.communityEvent.findMany({where:{OR:[{visibility:"public"},{visibility:"secret",invites:{some:{userId:u.id}}}]},orderBy:{startsAt:"asc"}});
