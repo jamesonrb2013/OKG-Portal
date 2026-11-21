@@ -30,6 +30,7 @@ model User {
   createdTasks StaffTask[] @relation("TaskCreator")
   staffReports StaffReport[] @relation("ReportAuthor")
   achievements MemberAchievement[]
+  eventInvites EventInvite[]
 }
 
 model MemberRole {
@@ -218,4 +219,14 @@ model MemberAchievement {
  awardedAt DateTime @default(now())
  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
  @@unique([userId, key])
+}
+
+model EventInvite {
+ id String @id @default(cuid())
+ eventId String
+ userId String
+ createdAt DateTime @default(now())
+ event CommunityEvent @relation(fields:[eventId],references:[id],onDelete:Cascade)
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ @@unique([eventId,userId])
 }
