@@ -1,8 +1,8 @@
 {
   "name": "okg-portal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Official One Kid Gaming member, staff and administration portal",
+  "description": "Official One Kid Gaming member, staff and executive community portal",
   "engines": {
     "node": ">=20"
   },
