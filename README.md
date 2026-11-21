@@ -58,7 +58,7 @@ Never commit secrets, tokens, or database credentials.
 2. Run `npm install`.
 3. Copy `.env.example` to `.env` and fill in the values.
 4. Run `npm run build`.
-5. Run `npm start` (the start script applies the Prisma schema before starting the web service).
+5. Apply schema changes explicitly with `npm run db:deploy` using the intended production database URL, then run `npm start`. The web service startup does not mutate the database schema.
 
 ## Discord setup
 
