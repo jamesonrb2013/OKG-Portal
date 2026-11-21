@@ -187,7 +187,7 @@ app.get("/applications", auth, requirePermission("applications:view"), async (re
  const rows=apps.map(a=>`<tr><td><b>${escapeHtml(applicantById.get(a.userId)?.displayName||applicantById.get(a.userId)?.username||"Unknown user")}</b><small>${escapeHtml(applicantById.get(a.userId)?.discordId||"")}</small></td><td>${escapeHtml(a.type)}</td><td><span class="status">${escapeHtml(a.status)}</span></td><td>${a.submittedAt.toLocaleDateString()}</td><td><a href="/applications/${a.id}">Open →</a></td></tr>`).join("");
  page(res,"Application review",`<section class="page-heading"><span class="eyebrow">STAFF WORKSPACE</span><h1>Application review.</h1><p>Private queue for authorized application staff.</p></section><section class="panel table-panel"><table><thead><tr><th>Applicant</th><th>Type</th><th>Status</th><th>Submitted</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5">No applications yet.</td></tr>'}</tbody></table></section>`,user);
 });
-app.get("/applications/:id", auth, requireOwner, async (req,res) => {
+app.get("/applications/:id", auth, requirePermission("applications:view"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
  const applicationId=String(String(req.params.id));
  const a=await db.application.findUnique({where:{id:applicationId}});
@@ -404,7 +404,7 @@ app.get("/api/owner/status", auth, requireOwner, async (_req,res) => {
  ]);
  res.json({ok:true,users,applications,queued,failed,discord:getDiscordStatus(),time:new Date().toISOString()});
 });
-app.post("/applications/:id/notes", auth, requireOwner, async (req,res) => {
+app.post("/applications/:id/notes", auth, requirePermission("applications:review"), async (req,res) => {
  const user=(req as AuthedRequest).portalUser!;
  const applicationId=String(String(req.params.id));
  const body=z.string().trim().min(1).max(2000).safeParse(req.body.body);
